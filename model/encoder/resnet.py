@@ -227,7 +227,7 @@ def _resnet(arch, block, layers, pretrained, progress, **kwargs):
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[arch],
                                               progress=progress)
-        if kwargs['input_channels'] != 3:
+        if kwargs['n_channels'] != 3:
             mis_key = ['conv1.weight', 'bn1.running_mean', 'bn1.running_var', 'bn1.weight', 'bn1.bias']
             for key in mis_key:
                 del state_dict[key]

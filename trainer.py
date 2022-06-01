@@ -1,11 +1,11 @@
-# -*- encoding: utf-8 -*-
 '''
-@File    :   trainer.py
-@Time    :   2021/11/29 16:51:29
-@Author  :   Jun Shi 
-@Version :   1.0
-@Contact :   shijun18@mail.ustc.edu.cn
-@License :   (C)Copyright 2019-2025, USTC-ACSA
+/*
+ * @Author: Jun Shi 
+ * @Date: 2022-05-25 20:09:05 
+ * @Last Modified by:   Jun Shi 
+ * @Last Modified time: 2022-05-25 20:09:05 
+ */
+# -*- encoding: utf-8 -*-
 '''
 
 # here put the import lib
@@ -31,7 +31,6 @@ from data_utils.data_loader import DataGenerator, To_Tensor, CropResize, Trunc_a
 from torch.cuda.amp import autocast as autocast
 
 from torch.cuda.amp import GradScaler
-from tqdm import tqdm
 import warnings
 warnings.filterwarnings('ignore')
 # GPU version.
@@ -53,7 +52,7 @@ class SemanticSeg(object):
     - device: string, use the specified device
     - pre_trained: True or False, default False
     - weight_path: weight path of pre-trained model
-    - mode: string __all__ = ['cls','seg','cls_and_seg','cls_or_seg']
+    - mode: string __all__ = ['cls','seg','mtl']
     '''
     def __init__(self,
                  net_name=None,
@@ -71,7 +70,7 @@ class SemanticSeg(object):
                  device=None,
                  pre_trained=False,
                  ex_pre_trained=False,
-                 ckpt_point=True,
+                 resume=True,
                  weight_path=None,
                  use_ssl=None,
                  weight_decay=0.,
@@ -100,7 +99,7 @@ class SemanticSeg(object):
         self.device = device
         self.pre_trained = pre_trained
         self.ex_pre_trained = ex_pre_trained 
-        self.ckpt_point = ckpt_point
+        self.resume = resume
         self.weight_path = weight_path
         self.use_ssl = use_ssl
 
@@ -126,7 +125,7 @@ class SemanticSeg(object):
         self.net = self._get_net(self.net_name)
 
         if self.pre_trained:
-            self._get_pre_trained(self.weight_path,ckpt_point)
+            self._get_pre_trained(self.weight_path,resume)
 
 
         if self.roi_number is not None:
@@ -249,7 +248,7 @@ class SemanticSeg(object):
         # optimizer setting
         optimizer = self._get_optimizer(optimizer, net, lr)
         scaler = GradScaler()
-        # if self.pre_trained and self.ckpt_point:
+        # if self.pre_trained and self.resume:
         #     checkpoint = torch.load(self.weight_path)
             # optimizer.load_state_dict(checkpoint['optimizer'])
 
@@ -542,7 +541,7 @@ class SemanticSeg(object):
         rundice = run_dice.compute_dice()[0] if self.mode != 'cls' else 0.
         return val_loss.avg, val_dice.avg, val_acc.avg,rundice
 
-    def test(self, test_path, save_path, net=None, mode='seg', save_flag=False):
+    def test(self, test_path, save_path, net=None, mode='seg', save_flag=False, get_roi=False):
         if net is None:
             net = self.net
         
@@ -552,7 +551,7 @@ class SemanticSeg(object):
 
         test_transformer = transforms.Compose([
             Trunc_and_Normalize(self.scale),
-            Get_ROI(pad_flag=False) if self.get_roi else transforms.Lambda(lambda x:x),
+            Get_ROI(pad_flag=False) if get_roi else transforms.Lambda(lambda x:x),
             CropResize(dim=self.input_shape,num_class=self.num_classes,crop=self.crop),
             To_Tensor(num_class=self.num_classes)
         ])
@@ -563,7 +562,7 @@ class SemanticSeg(object):
                                     transform=test_transformer)
 
         test_loader = DataLoader(test_dataset,
-                                batch_size=20,
+                                batch_size=16,
                                 shuffle=False,
                                 num_workers=self.num_workers,
                                 pin_memory=True)
@@ -594,35 +593,40 @@ class SemanticSeg(object):
                 with autocast(self.use_fp16):
                     output = net(data)
 
-                if mode == 'cls':
+                if mode != 'seg':
                     cls_output = output[1]
-                    cls_output = torch.sigmoid(cls_output).float()
+                    cls_output = torch.sigmoid(cls_output)
                     # measure acc
                     acc = accuracy(cls_output.detach(), label)
                     test_acc.update(acc.item(),data.size(0))
+
                     cls_result['prob'].extend(cls_output.detach().squeeze().cpu().numpy().tolist())
                     cls_output = (cls_output > 0.5).float() # N*C
                     cls_result['pred'].extend(cls_output.detach().squeeze().cpu().numpy().tolist())
                     cls_result['true'].extend(label.detach().squeeze().cpu().numpy().tolist())
                     # print(cls_output.detach())
-                if isinstance(output,list) or isinstance(output,tuple):
-                    seg_output = output[0].float() #N*C*H*W
-                else:
-                    seg_output = output.float()
-                seg_output = F.softmax(seg_output, dim=1)
-
-                # measure dice and iou for evaluation (float)
-                dice = compute_dice(seg_output.detach(), target, ignore_index=0)
-                test_dice.update(dice.item(), data.size(0))
                 
+                if mode != 'cls':
+                    if isinstance(output,list) or isinstance(output,tuple):
+                        seg_output = output[0].float() #N*C*H*W
+                    else:
+                        seg_output = output.float()
+                    seg_output = F.softmax(seg_output, dim=1)
+
+                    # measure dice and iou for evaluation (float)
+                    dice = compute_dice(seg_output.detach(), target, ignore_index=0)
+                    test_dice.update(dice.item(), data.size(0))
+
+                    seg_output = torch.argmax(seg_output,1).detach().cpu().numpy()  #N*H*W N=1
+                    target = torch.argmax(target,1).detach().cpu().numpy()
+                    run_dice.update_matrix(target,seg_output)
+                    # print(np.unique(seg_output),np.unique(target))
+                    print('step:{},test_dice:{:.5f}'.format(step,dice.item()))
+                    
                 if mode == 'mtl':
                     b, c, _, _ = seg_output.size()
                     seg_output[:,1:,...] = seg_output[:,1:,...] * cls_output.view(b,c-1,1,1).expand_as(seg_output[:,1:,...])
 
-                seg_output = torch.argmax(seg_output,1).detach().cpu().numpy()  #N*H*W N=1
-                target = torch.argmax(target,1).detach().cpu().numpy()
-                run_dice.update_matrix(target,seg_output)
-                # print(np.unique(seg_output),np.unique(target))
 
                 # save
                 if mode != 'cls' and save_flag:
@@ -632,9 +636,9 @@ class SemanticSeg(object):
 
                 torch.cuda.empty_cache()
                 
-                print('step:{},test_dice:{:.5f}'.format(step,dice.item()))
+               
             
-        rundice, dice_list = run_dice.compute_dice() 
+        rundice, dice_list = run_dice.compute_dice() if mode != 'cls' else (0.,[])
         print("Category Dice: ", dice_list)
         print('avg_dice:{:.5f},avg_acc:{:.5f},rundice:{:.5f}'.format(test_dice.avg, test_acc.avg, rundice))
 
@@ -880,11 +884,11 @@ class SemanticSeg(object):
         return lr_scheduler
 
 
-    def _get_pre_trained(self, weight_path, ckpt_point=True):
+    def _get_pre_trained(self, weight_path, resume=True):
         checkpoint = torch.load(weight_path,map_location='cpu')
         msg=self.net.load_state_dict(checkpoint['state_dict'],strict=False)
         print(msg)
-        if ckpt_point:
+        if resume:
             self.start_epoch = checkpoint['epoch'] + 1
             # self.loss_threshold = eval(os.path.splitext(self.weight_path.split(':')[-1])[0])
 

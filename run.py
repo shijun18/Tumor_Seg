@@ -14,11 +14,12 @@ import argparse
 from trainer import SemanticSeg
 import pandas as pd
 import random
+import numpy as np
 from sklearn.metrics import classification_report
 from sklearn.metrics import confusion_matrix
 
 from config import INIT_TRAINER, SETUP_TRAINER, CURRENT_FOLD, PATH_LIST, FOLD_NUM, ROI_NAME,TEST_PATH
-from config import VERSION, ROI_NAME, DISEASE, MODE
+from config import VERSION, ROI_NAME, DISEASE, MODE, WEIGHT_PATH_LIST
 import time
 
 
@@ -98,7 +99,7 @@ if __name__ == "__main__":
     parser.add_argument('-m',
                         '--mode',
                         default='train-cross',
-                        choices=["train", 'train-cross', "inf","test"],
+                        choices=["train", 'train-cross', "inf","test","test-cross"],
                         help='choose the mode',
                         type=str)
     parser.add_argument('-s', '--save', default='no', choices=['no', 'n', 'yes', 'y'],
@@ -114,13 +115,17 @@ if __name__ == "__main__":
     ###############################################
     if args.mode == 'train-cross':
         for current_fold in range(1, FOLD_NUM + 1):
-            print("=== Training Fold ", current_fold, " ===")
+            print(">>>> Training Fold ", current_fold)
+            if INIT_TRAINER['pre_trained']:
+                INIT_TRAINER['weight_path'] = WEIGHT_PATH_LIST[current_fold-1]
+                print('>>>> Loading weight: ',WEIGHT_PATH_LIST[current_fold-1])
             segnetwork = SemanticSeg(**INIT_TRAINER)
             print(get_parameter_number(segnetwork.net))
             train_path, val_path = get_cross_validation_by_sample(path_list, FOLD_NUM, current_fold)
             SETUP_TRAINER['train_path'] = train_path
             SETUP_TRAINER['val_path'] = val_path
             SETUP_TRAINER['cur_fold'] = current_fold
+            
             start_time = time.time()
             segnetwork.trainer(**SETUP_TRAINER)
 
@@ -143,18 +148,19 @@ if __name__ == "__main__":
     # Inference
     ###############################################
     if args.mode == 'test':
+        get_roi = False if 'roi' not in VERSION else True
         start_time = time.time()
         test_path = TEST_PATH
-        print("test set len:",len(test_path))
+        print("test set length:",len(test_path))
 
-        save_path = './analysis/result/{}/{}/{}'.format(DISEASE,VERSION,MODE)
+        save_path = './result/{}/{}/{}/{}'.format(DISEASE,MODE,VERSION,ROI_NAME)
         if not os.path.exists(save_path):
             os.makedirs(save_path)
         save_flag = False if args.save == 'no' or args.save == 'n' else True
-        cls_result = segnetwork.test(test_path,save_path,mode=MODE,save_flag=save_flag)
+        cls_result = segnetwork.test(test_path,save_path,mode=MODE,save_flag=save_flag,get_roi=get_roi)
 
         if MODE != 'seg':
-            csv_path = os.path.join(save_path,ROI_NAME + '.csv')
+            csv_path = os.path.join(save_path,f'fold{CURRENT_FOLD}.csv')
             info = {}
             info['id'] = test_path
             info['label'] = cls_result['true']
@@ -165,3 +171,45 @@ if __name__ == "__main__":
             csv_file = pd.DataFrame(info)
             csv_file.to_csv(csv_path, index=False)
         print('run time:%.4f' % (time.time() - start_time))
+
+
+    # test with cross validation
+    ###############################################
+    elif args.mode == 'test-cross':
+        get_roi = False if 'roi' not in VERSION else True
+        test_path = TEST_PATH
+        print('test set length:%d'%len(test_path))
+
+        save_path = './result/{}/{}/{}/{}'.format(DISEASE,MODE,VERSION,ROI_NAME)
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+        save_flag = False if args.save == 'no' or args.save == 'n' else True
+        start_time = time.time()
+        csv_path = os.path.join(save_path,'vote.csv')
+
+        info = {
+            'id':[],
+            'true': [],
+            'pred': []
+        }
+
+        start_time = time.time()
+        print(WEIGHT_PATH_LIST)
+        for i, weight_path in enumerate(WEIGHT_PATH_LIST):
+            print("Inference %d fold..." % (i+1))
+            INIT_TRAINER['weight_path'] = weight_path
+            segnetwork = SemanticSeg(**INIT_TRAINER)
+
+            cls_result= segnetwork.test(test_path,save_path,mode=MODE,save_flag=save_flag,get_roi=get_roi)
+            info['pred'].append(cls_result['pred'])
+            # print(np.array(all_result['pred']).shape)
+            
+        info['true'] = cls_result['true']
+        info['pred'] = list((np.sum(np.array(info['pred']),axis=0) > len(WEIGHT_PATH_LIST)//2).astype(np.int8))
+        # print(len(all_result['pred']))
+        print(classification_report(cls_result['true'],info['pred'], target_names=['without','with'],output_dict=False))
+        print(confusion_matrix(cls_result['true'],info['pred']))
+        info['id'] = test_path
+        csv_file = pd.DataFrame(info)
+        csv_file.to_csv(csv_path, index=False)
+    ###############################################

@@ -253,6 +253,19 @@ MODEL_CONFIG = {
             'classes':2,
             'aux_classifier': False
         },
+        'resnet50':{
+            'in_channels':1,
+            'encoder_name':'resnet50',
+            'encoder_weights':None,
+            'encoder_depth':5,
+            'encoder_channels':[64,256,512,1024,2048],  #[2,4,8,16,32]
+            'num_stage':4,
+            'decoder_use_batchnorm':True,
+            'decoder_channels':[128], #[16,8,4,2]
+            'upsampling':4,
+            'classes':2,
+            'aux_classifier': False
+        },
         'swin_transformer':{
             'in_channels': 1,
             'encoder_name': 'swin_transformer',

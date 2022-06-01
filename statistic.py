@@ -22,21 +22,27 @@ def statistic_csv(csv_list,save_path,col):
 
 if __name__ == '__main__':
     disease = 'HaN_GTV'
-
-    version_list = ['9.3-cls-roi-half']
+    mode = 'seg'
+    version_list = ['v7.1-roi-half']
     col_dict = {
-        'HaN_GTV':["CTV","Total"]
+        'HaN_GTV':["GTV","Total"]
     }
+    roi_name_dict = {
+        'HaN_GTV':"fake_GTV",
+    }
+
+    roi_name = roi_name_dict[disease]
+
     col = col_dict[disease]
 
-    save_dir = f'./result/analysis/{disease}'
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
     for version in version_list:
-        dice_csv_list = [f'./result/raw_data/{disease}/{version}_fold{str(i)}_dice.csv' for i in range(1,6)]
-        save_path = f'./result/analysis/{disease}/{version}_dice.csv'
+        save_dir = f'./result/{disease}/{mode}/{version}/{roi_name}'
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        dice_csv_list = [f'./result/{disease}/{mode}/{version}/{roi_name}/fold{str(i)}_dice.csv' for i in range(1,6)]
+        save_path = f'./result/{disease}/{mode}/{version}/{roi_name}/dice.csv'
         dice_list = statistic_csv(dice_csv_list,save_path,col)
 
-        hd_csv_list = [f'./result/raw_data/{disease}/{version}_fold{str(i)}_hd.csv' for i in range(1,6)]
-        save_path = f'./result/analysis/{disease}/{version}_hd.csv'
+        hd_csv_list = [f'./result/{disease}/{mode}/{version}/{roi_name}/fold{str(i)}_hd.csv' for i in range(1,6)]
+        save_path = f'./result/{disease}/{mode}/{version}/{roi_name}/hd.csv'
         hd_list = statistic_csv(hd_csv_list,save_path,col)

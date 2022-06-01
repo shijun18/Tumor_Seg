@@ -2,15 +2,15 @@ import os
 import time
 import numpy as np
 import pandas as pd
-from config import ROI_NAME
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from data_utils.data_loader import DataGenerator, To_Tensor, CropResize, Trunc_and_Normalize
 from data_utils.transformer import Get_ROI
 from torch.cuda.amp import autocast as autocast
-from utils import get_weight_path,multi_dice,multi_hd
+from utils import get_weight_path,multi_dice,multi_hd,ensemble,post_seg
 import warnings
+from utils import csv_reader_single
 warnings.filterwarnings('ignore')
 
 def resize_and_pad(pred,true,num_classes,target_shape,bboxs):
@@ -30,8 +30,8 @@ def resize_and_pad(pred,true,num_classes,target_shape,bboxs):
         final_pred.append(new_pred)
         final_true.append(new_true)
     
-    final_pred = np.concatenate(final_pred,axis=0)
-    final_true = np.concatenate(final_true,axis=0)
+    final_pred = np.stack(final_pred,axis=0)
+    final_true = np.stack(final_true,axis=0)
     return final_pred, final_true
 
 
@@ -272,13 +272,15 @@ class Config:
     mode = 'seg'
     num_classes = num_classes_dict[disease]
     scale = scale_dict[disease]
+
+    two_stage = True
     
-    net_name = 'res_unet'
+    net_name = 'FPN'
     encoder_name = 'resnet18'
-    version = 'v6.1'
+    version = 'v3.1-roi-half'
     
     fold = 1
-    device = "1"
+    device = "0"
     roi_name = roi_dict[disease]
     
     get_roi = False if 'roi' not in version else True
@@ -293,13 +295,21 @@ if __name__ == '__main__':
     data_path_dict = {
         'HaN_GTV':'/staff/shijun/dataset/Med_Seg/HaN_GTV/2d_test_data'
     }
+    cls_result_dict = {
+        'HaN_GTV':'./result/HaN_GTV/cls/v7.1-roi-half/GTV/vote.csv',
+        # 'HaN_GTV':'/staff/shijun/torch_projects/Med_Seg/converter/nii_converter/static_files/han_gtv_test.csv'
+    }
     
     start = time.time()
     config = Config()
     data_path = data_path_dict[config.disease]
     sample_list = list(set([case.name.split('_')[0] for case in os.scandir(data_path)]))
     sample_list.sort()
+    # sample_list = ['39']
+    cls_result = csv_reader_single(cls_result_dict[config.disease],'id','pred') 
+    # cls_result = csv_reader_single(cls_result_dict[config.disease],'path','GTV') 
 
+    ensemble_result = {}
     for fold in range(1,6):
         print('>>>>>>>>>>>> Fold%d >>>>>>>>>>>>'%fold)
         total_dice = []
@@ -308,6 +318,10 @@ if __name__ == '__main__':
         info_hd = []
         config.fold = fold
         config.ckpt_path = f'./ckpt/{config.disease}/{config.mode}/{config.version}/{config.roi_name}/fold{str(fold)}'
+        save_dir = f'./result/{config.disease}/{config.mode}/{config.version}/{config.roi_name}'
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
         for sample in sample_list:
             info_item_dice = []
             info_item_hd = []
@@ -317,8 +331,16 @@ if __name__ == '__main__':
             test_path = [case.path for case in os.scandir(data_path) if case.name.split('_')[0] == sample]
             test_path.sort(key=lambda x:eval(x.split('_')[-1].split('.')[0]))
             print(len(test_path))
+            # get end_index and start_index
+            if config.two_stage:
+                sample_index = [cls_result[ID] for ID in test_path]
+                nonzero_index = np.nonzero(np.asarray(sample_index))
+                s_index, e_index = np.min(nonzero_index), np.max(nonzero_index)
+                test_path = test_path[s_index:e_index]
+            ##
             sample_start = time.time()
             pred,true,extra_time = eval_process(test_path,config)
+            
             total_time = time.time() - sample_start 
             actual_time = total_time - extra_time
             print('total time:%.3f'%total_time)
@@ -330,6 +352,7 @@ if __name__ == '__main__':
             total_dice.append(category_dice)
             print('category dice:',category_dice)
             print('avg dice: %s'% avg_dice)
+            # print(pred.shape,true.shape)
 
             category_hd, avg_hd = multi_hd(true,pred,config.num_classes - 1)
             total_hd.append(category_hd)
@@ -342,12 +365,17 @@ if __name__ == '__main__':
             info_dice.append(info_item_dice)
             info_hd.append(info_item_hd)
 
+            if sample not in ensemble_result:
+                ensemble_result[sample] = {
+                    'true':[true],
+                    'pred':[]
+                }
+            ensemble_result[sample]['pred'].append(pred)
+
         dice_csv = pd.DataFrame(data=info_dice)
         hd_csv = pd.DataFrame(data=info_hd)
-        if not os.path.exists(f'./result/raw_data/{config.disease}'):
-            os.makedirs(f'./result/raw_data/{config.disease}')
-        dice_csv.to_csv(f'./result/raw_data/{config.disease}/{config.version}_fold{config.fold}_dice.csv')
-        hd_csv.to_csv(f'./result/raw_data/{config.disease}/{config.version}_fold{config.fold}_hd.csv')
+        dice_csv.to_csv(os.path.join(save_dir,f'fold{config.fold}_dice.csv'))
+        hd_csv.to_csv(os.path.join(save_dir,f'fold{config.fold}_hd.csv'))
 
         total_dice = np.stack(total_dice,axis=0) #sample*classes
         total_category_dice = np.mean(total_dice,axis=0)
@@ -367,3 +395,64 @@ if __name__ == '__main__':
         print('total hd mean: %s'% total_avg_hd)
 
         print("runtime:%.3f"%(time.time() - start))
+
+    #### for ensemble and post-processing
+
+    ensemble_info_dice = []
+    ensemble_info_hd = []
+    post_ensemble_info_dice = []
+    post_ensemble_info_hd = []
+
+    for sample in sample_list:
+        print('>>>> %s in post processing'%sample)
+        ensemble_pred = ensemble(np.stack(ensemble_result[sample]['pred'],axis=0),config.num_classes - 1)
+        ensemble_true = ensemble_result[sample]['true'][0]
+        category_dice, avg_dice = multi_dice(ensemble_true,ensemble_pred,config.num_classes - 1)
+        category_hd, avg_hd = multi_hd(ensemble_true,ensemble_pred,config.num_classes - 1)
+
+        post_ensemble_pred = post_seg(ensemble_pred,list(range(1,config.num_classes)))
+        post_category_dice, post_avg_dice = multi_dice(ensemble_true,ensemble_pred,config.num_classes - 1)
+        post_category_hd, post_avg_hd = multi_hd(ensemble_true,ensemble_pred,config.num_classes - 1)
+
+
+        print('ensemble category dice:',category_dice)
+        print('ensemble avg dice: %s'% avg_dice)
+        print('ensemble category hd:',category_hd)
+        print('ensemble avg hd: %s'% avg_hd)
+
+
+        print('post ensemble category dice:',post_category_dice)
+        print('post ensemble avg dice: %s'% post_avg_dice)
+        print('post ensemble category hd:',post_category_hd)
+        print('post ensemble avg hd: %s'% post_avg_hd)
+        
+
+        ensemble_item_dice = [sample]
+        ensemble_item_hd = [sample]
+        post_ensemble_item_dice = [sample]
+        post_ensemble_item_hd = [sample]
+        
+        ensemble_item_dice.extend(category_dice)
+        ensemble_item_hd.extend(category_hd)
+        post_ensemble_item_dice.extend(post_category_dice)
+        post_ensemble_item_hd.extend(post_category_hd)
+        
+
+        ensemble_info_dice.append(ensemble_item_dice)
+        ensemble_info_hd.append(ensemble_item_hd)
+        post_ensemble_info_dice.append(post_ensemble_item_dice)
+        post_ensemble_info_hd.append(post_ensemble_item_hd)
+    
+
+    ensemble_dice_csv = pd.DataFrame(data=ensemble_info_dice)
+    ensemble_hd_csv = pd.DataFrame(data=ensemble_info_hd)
+    post_ensemble_dice_csv = pd.DataFrame(data=post_ensemble_info_dice)
+    post_ensemble_hd_csv = pd.DataFrame(data=post_ensemble_info_hd)
+
+    
+    ensemble_dice_csv.to_csv(os.path.join(save_dir,'ensemble_dice.csv'))
+    ensemble_hd_csv.to_csv(os.path.join(save_dir,'ensemble_hd.csv'))
+    post_ensemble_dice_csv.to_csv(os.path.join(save_dir,'post_ensemble_dice.csv'))
+    post_ensemble_hd_csv.to_csv(os.path.join(save_dir,'post_ensemble_hd.csv'))
+
+    #### end

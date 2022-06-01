@@ -26,7 +26,6 @@ class Xception(nn.Module):
 
     def get_stages(self):
         return [
-            nn.Identity(),
             nn.Sequential(
                 self.model.conv1, 
                 self.model.bn1, 
@@ -63,10 +62,9 @@ class Xception(nn.Module):
         stages = self.get_stages()
 
         features = []
-        for i in range(self.depth + 1):
+        for i in range(self.depth):
             x = stages[i](x)
-            if i != 0:
-                features.append(x)
+            features.append(x)
 
         return features
 

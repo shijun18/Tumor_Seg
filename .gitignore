@@ -5,6 +5,7 @@ __pycache__/
 .vscode/
 dataset/
 result/
+analysis/
 # C extensions
 *.so
 
