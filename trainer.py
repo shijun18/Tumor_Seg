@@ -450,7 +450,7 @@ class SemanticSeg(object):
         else:
             val_transformer = transforms.Compose([
                 Trunc_and_Normalize(self.scale),
-                Get_ROI(pad_flag=False) if self.get_roi else transforms.Lambda(lambda x:x),
+                Get_ROI(pad_flag=False) if self.get_roi and len(self.input_shape) == 2 else transforms.Lambda(lambda x:x),
                 CropResize(dim=self.input_shape,num_class=self.num_classes,crop=self.crop),
                 To_Tensor(num_class=self.num_classes)
             ])
@@ -766,7 +766,15 @@ class SemanticSeg(object):
                 classes=self.num_classes,
                 aux_deepvision=self.aux_deepvision
             )
-
+        
+        ## 3D Net
+        elif net_name.startswith('vnet'):
+            import model.vnet as vnet
+            net = vnet.__dict__[net_name](
+                init_depth=self.input_shape[0],
+                in_channels=self.channels,
+                classes=self.num_classes,
+            )
         ## external transformer + U-like net
         elif net_name == 'UTNet':
             from model.trans_model.utnet import UTNet

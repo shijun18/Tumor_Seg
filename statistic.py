@@ -23,12 +23,13 @@ def statistic_csv(csv_list,save_path,col):
 if __name__ == '__main__':
     disease = 'HaN_GTV'
     mode = 'seg'
-    version_list = ['v7.1-roi-half']
+    # version_list = ['v7.1-roi-zero','v7.1-roi-equal','v7.1-roi-half','v7.1-roi-quar','v7.1-roi-half-ssl']
+    version_list = ['v7.1-cls-roi-half']
     col_dict = {
         'HaN_GTV':["GTV","Total"]
     }
     roi_name_dict = {
-        'HaN_GTV':"fake_GTV",
+        'HaN_GTV':"GTV",
     }
 
     roi_name = roi_name_dict[disease]
@@ -45,4 +46,12 @@ if __name__ == '__main__':
 
         hd_csv_list = [f'./result/{disease}/{mode}/{version}/{roi_name}/fold{str(i)}_hd.csv' for i in range(1,6)]
         save_path = f'./result/{disease}/{mode}/{version}/{roi_name}/hd.csv'
+        hd_list = statistic_csv(hd_csv_list,save_path,col)
+
+        dice_csv_list = [f'./result/{disease}/{mode}/{version}/{roi_name}/ts_fold{str(i)}_dice.csv' for i in range(1,6)]
+        save_path = f'./result/{disease}/{mode}/{version}/{roi_name}/ts_dice.csv'
+        dice_list = statistic_csv(dice_csv_list,save_path,col)
+
+        hd_csv_list = [f'./result/{disease}/{mode}/{version}/{roi_name}/ts_fold{str(i)}_hd.csv' for i in range(1,6)]
+        save_path = f'./result/{disease}/{mode}/{version}/{roi_name}/ts_hd.csv'
         hd_list = statistic_csv(hd_csv_list,save_path,col)

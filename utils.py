@@ -212,5 +212,22 @@ if __name__ == "__main__":
     # ckpt_path = './ckpt/TMLI_UP/seg/v9.0/All/fold1/'
     # dfs_remove_weight(ckpt_path)
 
-    ckpt_path = './ckpt/'
-    dfs_rename_weight(ckpt_path)
+    # ckpt_path = './ckpt/'
+    # dfs_rename_weight(ckpt_path)
+
+    data_path  = '/staff/shijun/dataset/Med_Seg/HaN_GTV/npy_data'
+    
+    min_index = 200
+    max_index = 0
+
+    for sample in os.scandir(data_path):
+        data_array = hdf5_reader(sample.path,'label')
+        # print(data_array.shape)
+        data_index = np.sum(data_array,axis=(1,2))
+        data_index = (data_index > 0).astype(np.uint8)
+        nonzero = np.nonzero(data_index)
+        max_index = max_index if np.max(nonzero) < max_index else np.max(nonzero)
+        min_index = min_index if np.min(nonzero) > min_index else np.min(nonzero)
+    
+    
+    print(min_index,max_index)

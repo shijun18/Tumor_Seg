@@ -6,7 +6,7 @@ from model.encoder import swin_transformer,simplenet,resnet,mobilenetv3,xception
 
 ssl_weight_path = {
     'resnet18':'/staff/shijun/torch_projects/Med_Seg/mae/convert_ckpt/CNN/mae_res18_p8/v2.0-HaN-roi-75/convert_epoch=0399-loss=0.282656.pth.tar',
-    'resnet50':None,
+    'resnet50':'/staff/shijun/torch_projects/Med_Seg/mae/convert_ckpt/CNN/mae_res50_p8/v5.0-HaN-roi-75/convert_epoch=0399-loss=0.266160.pth.tar',
 }
 
 def build_encoder(arch='resnet18', weights=None, **kwargs):

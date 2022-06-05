@@ -8,7 +8,7 @@ from utils import get_weight_path,get_weight_list
 
 
 __cnn_net__ = ['unet','unet++','FPN','deeplabv3+','att_unet', \
-                'res_unet','sfnet']
+                'res_unet','sfnet','vnet','vnet_lite']
 __swinconv__=['swinconv_base'] 
 
 __trans_net__ = ['UTNet','UTNet_encoder','TransUNet','ResNet_UTNet','SwinUNet']
@@ -34,25 +34,25 @@ json_path = {
 }
     
 DISEASE = 'HaN_GTV' 
-MODE = 'cls'
+MODE = 'mtl'
 NET_NAME = 'sfnet'
-ENCODER_NAME = 'resnet50'
-VERSION = 'v7.3-roi-half'
+ENCODER_NAME = 'resnet18'
+VERSION = 'v7.1.1-roi-half'
 
 
 with open(json_path[DISEASE], 'r') as fp:
     info = json.load(fp)
 
-DEVICE = '0'
+DEVICE = '3'
 # True if use internal pre-trained model
 # Must be True when pre-training and inference
-PRE_TRAINED = True
+PRE_TRAINED = False
 # True if use external pre-trained model 
 EX_PRE_TRAINED = True if 'pretrain' in VERSION else False
 # True if use resume model
 RESUME = False
 # [1-N]
-CURRENT_FOLD = 1
+CURRENT_FOLD = 5
 GPU_NUM = len(DEVICE.split(','))
 FOLD_NUM = 5
 
@@ -72,6 +72,9 @@ SCALE = info['scale'][ROI_NAME]
 #zero
 if 'zero' in VERSION:
     PATH_LIST = get_path_with_annotation(info['2d_data']['csv_path'],'path',ROI_NAME)
+#equal
+elif 'equal' in VERSION:
+    PATH_LIST = get_path_with_annotation_ratio(info['2d_data']['csv_path'],'path',ROI_NAME,ratio=1.0)
 #half
 elif 'half' in VERSION:
     PATH_LIST = get_path_with_annotation_ratio(info['2d_data']['csv_path'],'path',ROI_NAME,ratio=0.5)
@@ -80,14 +83,20 @@ elif 'quar' in VERSION:
     PATH_LIST = get_path_with_annotation_ratio(info['2d_data']['csv_path'],'path',ROI_NAME,ratio=0.25)
 else:
     #all
-    PATH_LIST = glob.glob(os.path.join(info['2d_data']['save_path'],'*.hdf5'))
+    if 'vnet' in NET_NAME:
+        PATH_LIST = glob.glob(os.path.join(info['3d_data']['save_path'],'*.hdf5'))
+    else:
+        PATH_LIST = glob.glob(os.path.join(info['2d_data']['save_path'],'*.hdf5'))
 #---------------------------------
 
 
 #--------------------------------- others
-INPUT_SHAPE = (512,512)#(512,512) (256,256)
-BATCH_SIZE = 32
-
+if 'vnet' in NET_NAME:
+    INPUT_SHAPE = (96,256,256)#(512,512) (256,256)
+    BATCH_SIZE = 8
+else:
+    INPUT_SHAPE = (512,512)#(512,512) (256,256)
+    BATCH_SIZE = 64
 
 # CKPT_PATH = './ckpt/{}/{}/{}/{}/fold{}'.format(DISEASE,'cls',VERSION.replace('-cls','').replace('-freeze',''),ROI_NAME,str(CURRENT_FOLD))
 CKPT_PATH = './ckpt/{}/{}/{}/{}/fold{}'.format(DISEASE,MODE,VERSION,ROI_NAME,str(CURRENT_FOLD))

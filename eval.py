@@ -275,12 +275,12 @@ class Config:
 
     two_stage = True
     
-    net_name = 'FPN'
+    net_name = 'sfnet'
     encoder_name = 'resnet18'
-    version = 'v3.1-roi-half'
+    version = 'v7.1-cls-roi-half'
     
     fold = 1
-    device = "0"
+    device = "2"
     roi_name = roi_dict[disease]
     
     get_roi = False if 'roi' not in version else True
@@ -374,8 +374,13 @@ if __name__ == '__main__':
 
         dice_csv = pd.DataFrame(data=info_dice)
         hd_csv = pd.DataFrame(data=info_hd)
-        dice_csv.to_csv(os.path.join(save_dir,f'fold{config.fold}_dice.csv'))
-        hd_csv.to_csv(os.path.join(save_dir,f'fold{config.fold}_hd.csv'))
+
+        if not config.two_stage:
+            dice_csv.to_csv(os.path.join(save_dir,f'fold{config.fold}_dice.csv'))
+            hd_csv.to_csv(os.path.join(save_dir,f'fold{config.fold}_hd.csv'))
+        else:
+            dice_csv.to_csv(os.path.join(save_dir,f'ts_fold{config.fold}_dice.csv'))
+            hd_csv.to_csv(os.path.join(save_dir,f'ts_fold{config.fold}_hd.csv'))
 
         total_dice = np.stack(total_dice,axis=0) #sample*classes
         total_category_dice = np.mean(total_dice,axis=0)
@@ -449,10 +454,16 @@ if __name__ == '__main__':
     post_ensemble_dice_csv = pd.DataFrame(data=post_ensemble_info_dice)
     post_ensemble_hd_csv = pd.DataFrame(data=post_ensemble_info_hd)
 
-    
-    ensemble_dice_csv.to_csv(os.path.join(save_dir,'ensemble_dice.csv'))
-    ensemble_hd_csv.to_csv(os.path.join(save_dir,'ensemble_hd.csv'))
-    post_ensemble_dice_csv.to_csv(os.path.join(save_dir,'post_ensemble_dice.csv'))
-    post_ensemble_hd_csv.to_csv(os.path.join(save_dir,'post_ensemble_hd.csv'))
+    if not config.two_stage:
+        ensemble_dice_csv.to_csv(os.path.join(save_dir,'ensemble_dice.csv'))
+        ensemble_hd_csv.to_csv(os.path.join(save_dir,'ensemble_hd.csv'))
+        post_ensemble_dice_csv.to_csv(os.path.join(save_dir,'post_ensemble_dice.csv'))
+        post_ensemble_hd_csv.to_csv(os.path.join(save_dir,'post_ensemble_hd.csv'))
+
+    else:
+        ensemble_dice_csv.to_csv(os.path.join(save_dir,'ts_ensemble_dice.csv'))
+        ensemble_hd_csv.to_csv(os.path.join(save_dir,'ts_ensemble_hd.csv'))
+        post_ensemble_dice_csv.to_csv(os.path.join(save_dir,'ts_post_ensemble_dice.csv'))
+        post_ensemble_hd_csv.to_csv(os.path.join(save_dir,'ts_post_ensemble_hd.csv'))
 
     #### end

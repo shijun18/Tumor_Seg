@@ -39,6 +39,19 @@ MODEL_CONFIG = {
             'classes':2,
             'aux_classifier': False
         },
+        'resnet50':{
+            'in_channels':1,
+            'encoder_name':'resnet50',
+            'encoder_depth':5,
+            'encoder_channels':[64,256,512,1024,2048],  #[2,4,8,16,32]
+            'encoder_weights':None,
+            'decoder_use_batchnorm':True,
+            'decoder_attention_type':None,
+            'decoder_channels':[256,128,64,32], #[16,8,4,2]
+            'upsampling':2,
+            'classes':2,
+            'aux_classifier': False
+        }
     },
     # att unet
     'att_unet':{
@@ -80,6 +93,19 @@ MODEL_CONFIG = {
             'upsampling':2,
             'classes':2,
             'aux_classifier': False
+        },
+        'resnet50':{
+            'in_channels':1,
+            'encoder_name':'resnet50',
+            'encoder_depth':5,
+            'encoder_channels':[64,256,512,1024,2048],  #[2,4,8,16,32]
+            'encoder_weights':None,
+            'decoder_use_batchnorm':True,
+            'decoder_attention_type':None,
+            'decoder_channels':[256,128,64,32], #[16,8,4,2]
+            'upsampling':2,
+            'classes':2,
+            'aux_classifier': False
         }
     },
     # res unet
@@ -104,6 +130,21 @@ MODEL_CONFIG = {
             'encoder_name':'resnet18',
             'encoder_depth':5,
             'encoder_channels':[64,64,128,256,512],  #[2,4,8,16,32]
+            'encoder_weights':None,
+            'decoder_use_batchnorm':True,
+            'decoder_attention_type':None,
+            'decoder_channels':[256,128,64,32], #[16,8,4,2]
+            'upsampling':2,
+            'classes':2,
+            'use_center':False,
+            'aux_classifier': False,
+            'aux_deepvision':False
+        },
+        'resnet50':{
+            'in_channels':1,
+            'encoder_name':'resnet50',
+            'encoder_depth':5,
+            'encoder_channels':[64,256,512,1024,2048],  #[2,4,8,16,32]
             'encoder_weights':None,
             'decoder_use_batchnorm':True,
             'decoder_attention_type':None,
