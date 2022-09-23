@@ -8,6 +8,7 @@ from model.deeplabv3plus import deeplabv3plus
 from model.bisenetv1 import bisenetv1
 from model.bisenetv2 import bisenetv2
 from model.sfnet import sfnet
+from model.sanet import sanet
 from model.icnet import icnet
 from model.swin_conv import swinconv_base
 
@@ -45,15 +46,20 @@ if __name__ == '__main__':
     # net = bisenetv2('bisenetv2','xception',in_channels=1,classes=2)
 
     #sfnet
-    # net = sfnet('sfnet','resnet18',in_channels=1,classes=2)
+    # net = sfnet('sfnet','resnet50',in_channels=1,classes=2)
     # net = sfnet('sfnet','simplenet',in_channels=1,classes=2)
     # net = sfnet('sfnet','swin_transformer',in_channels=1,classes=2)
+
+    #sanet
+    net = sanet('sanet','resnet18',in_channels=1,classes=2)
+    # net = sanet('sfnet','simplenet',in_channels=1,classes=2)
+    # net = sanet('sfnet','swin_transformer',in_channels=1,classes=2)
 
     #icnet
     # net = icnet('icnet','resnet18',in_channels=1,classes=2)
 
     #swinconv
-    net = swinconv_base(in_channels=1,classes=2,aux_deepvision=True)
+    # net = swinconv_base(in_channels=1,classes=2,aux_deepvision=True)
 
     summary(net.cuda(),input_size=(1,224,224),batch_size=1,device='cuda')
     

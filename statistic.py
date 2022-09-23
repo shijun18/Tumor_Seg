@@ -5,8 +5,9 @@ import numpy as np
 def statistic_csv(csv_list,save_path,col):
     data = []
     for csv in csv_list:
-        df = pd.read_csv(csv)
-        data_item =  np.asarray(df,dtype=np.float32)[:,2:]
+        df = pd.read_csv(csv,sep=',')
+        del df['0']
+        data_item =  np.asarray(df,dtype=np.float32)[:,1:]
         data_item = np.where(np.logical_or(data_item==0.,data_item==1.0),np.nan,data_item)
         data_mean = np.nanmean(data_item,axis=0)
         # print(data_mean)
@@ -21,15 +22,18 @@ def statistic_csv(csv_list,save_path,col):
     df.to_csv(save_path,index=False)
 
 if __name__ == '__main__':
-    disease = 'HaN_GTV'
+    disease = 'THOR_GTV' #THOR_GTV
     mode = 'seg'
     # version_list = ['v7.1-roi-zero','v7.1-roi-equal','v7.1-roi-half','v7.1-roi-quar','v7.1-roi-half-ssl']
-    version_list = ['v7.1-cls-roi-half']
+    # version_list = ['v7.1.1-roi-half']
+    version_list = ['v10.1-roi-all-x16']
     col_dict = {
-        'HaN_GTV':["GTV","Total"]
+        'HaN_GTV':["GTV","Total"],
+        'THOR_GTV':["GTV","Total"]
     }
     roi_name_dict = {
-        'HaN_GTV':"GTV",
+        'HaN_GTV':"GTV_mtl",
+        'THOR_GTV':"GTV_equal"
     }
 
     roi_name = roi_name_dict[disease]
@@ -40,18 +44,35 @@ if __name__ == '__main__':
         save_dir = f'./result/{disease}/{mode}/{version}/{roi_name}'
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
-        dice_csv_list = [f'./result/{disease}/{mode}/{version}/{roi_name}/fold{str(i)}_dice.csv' for i in range(1,6)]
-        save_path = f'./result/{disease}/{mode}/{version}/{roi_name}/dice.csv'
+        # dice_csv_list = [f'./result_v2/{disease}/{mode}/{version}/{roi_name}/fold{str(i)}_dice.csv' for i in range(1,6)]
+        # save_path = f'./result_v2/{disease}/{mode}/{version}/{roi_name}/dice.csv'
+        # dice_list = statistic_csv(dice_csv_list,save_path,col)
+
+        # hd_csv_list = [f'./result_v2/{disease}/{mode}/{version}/{roi_name}/fold{str(i)}_hd.csv' for i in range(1,6)]
+        # save_path = f'./result_v2/{disease}/{mode}/{version}/{roi_name}/hd.csv'
+        # hd_list = statistic_csv(hd_csv_list,save_path,col)
+
+        # precision_csv_list = [f'./result_v2/{disease}/{mode}/{version}/{roi_name}/fold{str(i)}_precision.csv' for i in range(1,6)]
+        # save_path = f'./result_v2/{disease}/{mode}/{version}/{roi_name}/precision.csv'
+        # precision_list = statistic_csv(precision_csv_list,save_path,col)
+
+        # recall_csv_list = [f'./result_v2/{disease}/{mode}/{version}/{roi_name}/fold{str(i)}_recall.csv' for i in range(1,6)]
+        # save_path = f'./result_v2/{disease}/{mode}/{version}/{roi_name}/recall.csv'
+        # recall_list = statistic_csv(recall_csv_list,save_path,col)
+
+        dice_csv_list = [f'./result_v2/{disease}/{mode}/{version}/{roi_name}/ts_fold{str(i)}_dice.csv' for i in range(1,6)]
+        save_path = f'./result_v2/{disease}/{mode}/{version}/{roi_name}/ts_dice.csv'
         dice_list = statistic_csv(dice_csv_list,save_path,col)
 
-        hd_csv_list = [f'./result/{disease}/{mode}/{version}/{roi_name}/fold{str(i)}_hd.csv' for i in range(1,6)]
-        save_path = f'./result/{disease}/{mode}/{version}/{roi_name}/hd.csv'
+        hd_csv_list = [f'./result_v2/{disease}/{mode}/{version}/{roi_name}/ts_fold{str(i)}_hd.csv' for i in range(1,6)]
+        save_path = f'./result_v2/{disease}/{mode}/{version}/{roi_name}/ts_hd.csv'
         hd_list = statistic_csv(hd_csv_list,save_path,col)
 
-        dice_csv_list = [f'./result/{disease}/{mode}/{version}/{roi_name}/ts_fold{str(i)}_dice.csv' for i in range(1,6)]
-        save_path = f'./result/{disease}/{mode}/{version}/{roi_name}/ts_dice.csv'
-        dice_list = statistic_csv(dice_csv_list,save_path,col)
 
-        hd_csv_list = [f'./result/{disease}/{mode}/{version}/{roi_name}/ts_fold{str(i)}_hd.csv' for i in range(1,6)]
-        save_path = f'./result/{disease}/{mode}/{version}/{roi_name}/ts_hd.csv'
-        hd_list = statistic_csv(hd_csv_list,save_path,col)
+        precision_csv_list = [f'./result_v2/{disease}/{mode}/{version}/{roi_name}/ts_fold{str(i)}_precision.csv' for i in range(1,6)]
+        save_path = f'./result_v2/{disease}/{mode}/{version}/{roi_name}/ts_precision.csv'
+        precision_list = statistic_csv(precision_csv_list,save_path,col)
+
+        recall_csv_list = [f'./result_v2/{disease}/{mode}/{version}/{roi_name}/ts_fold{str(i)}_recall.csv' for i in range(1,6)]
+        save_path = f'./result_v2/{disease}/{mode}/{version}/{roi_name}/ts_recall.csv'
+        recall_list = statistic_csv(recall_csv_list,save_path,col)

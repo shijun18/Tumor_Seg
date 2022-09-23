@@ -3,13 +3,15 @@ import time
 import numpy as np
 import pandas as pd
 import torch
+from sklearn.metrics import confusion_matrix,recall_score,precision_score
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from data_utils.data_loader import DataGenerator, To_Tensor, CropResize, Trunc_and_Normalize
 from data_utils.transformer import Get_ROI
 from torch.cuda.amp import autocast as autocast
-from utils import get_weight_path,multi_dice,multi_hd,ensemble,post_seg
+from utils import get_weight_path,multi_dice,multi_hd,ensemble,post_seg,cal_score,multi_vs,multi_jc
 import warnings
+import SimpleITK as sitk
 from utils import csv_reader_single
 warnings.filterwarnings('ignore')
 
@@ -116,6 +118,14 @@ def get_net(net_name,encoder_name,channels=1,num_classes=2,input_shape=(512,512)
             classes=num_classes,
             **kwargs)
     
+    elif net_name == 'sanet':
+            from model.sanet import sanet
+            net = sanet(net_name,
+            encoder_name=encoder_name,
+            in_channels=channels,
+            classes=num_classes,
+            **kwargs)
+    
     elif net_name == 'att_unet':
         from model.att_unet import att_unet
         net = att_unet(net_name,
@@ -129,6 +139,14 @@ def get_net(net_name,encoder_name,channels=1,num_classes=2,input_shape=(512,512)
             encoder_name=encoder_name,
             in_channels=channels,
             classes=num_classes)
+    
+    elif net_name.startswith('vnet'):
+        import model.vnet as vnet
+        net = vnet.__dict__[net_name](
+            init_depth=input_shape[0],
+            in_channels=channels,
+            classes=num_classes,
+        )
 
     ## external transformer + U-like net
     elif net_name == 'UTNet':
@@ -214,7 +232,7 @@ def eval_process(test_path,config):
     # print(device)
     net = net.to(device)
     net.eval()
-    move_time = time.time()- s_time
+    move_time = time.time() - s_time
     print('move net to GPU need time:%.3f'%(move_time))
 
     extra_time = 0.
@@ -242,8 +260,9 @@ def eval_process(test_path,config):
                 seg_output,target = resize_and_pad(seg_output,target,config.num_classes,config.input_shape,bboxs)
             pred.append(seg_output)
             true.append(target)
-    pred = np.concatenate(pred,axis=0)
-    true = np.concatenate(true,axis=0)
+    pred = np.concatenate(pred,axis=0).squeeze().astype(np.uint8)
+    true = np.concatenate(true,axis=0).squeeze().astype(np.uint8)
+    # print(pred.shape)
     print('extra time:%.3f'%extra_time)
     return pred,true,extra_time+move_time+get_net_time
 
@@ -252,17 +271,20 @@ class Config:
 
     num_classes_dict = {
         'HaN_GTV':2,
+        'THOR_GTV':2
 
     }
     scale_dict = {
         'HaN_GTV':[-150,200],
+        'THOR_GTV':[-800,400]
     }
 
     roi_dict = {
-        'HaN_GTV':'GTV'
+        'HaN_GTV':'GTV',
+        'THOR_GTV':'GTV'
     }
     
-    input_shape = (512,512) #(256,256)(512,512)(448,448) 
+    input_shape = (96,512,512) #(512,512)(96,256,256)
     channels = 1
     crop = 0
     roi_number = 1
@@ -273,52 +295,82 @@ class Config:
     num_classes = num_classes_dict[disease]
     scale = scale_dict[disease]
 
-    two_stage = True
+    two_stage = False
     
-    net_name = 'sfnet'
-    encoder_name = 'resnet18'
-    version = 'v7.1-cls-roi-half'
+    net_name = 'vnet'
+    encoder_name = None
+    version = 'v8.0'
     
     fold = 1
-    device = "2"
+    device = "3"
     roi_name = roi_dict[disease]
     
     get_roi = False if 'roi' not in version else True
     aux_deepvision = False if 'sup' not in version else True
     aux_classifier = mode != 'seg'
     ckpt_path = f'./ckpt/{disease}/{mode}/{version}/{roi_name}'
+    post_fix = ''
 
 
 if __name__ == '__main__':
 
     # test data
+    exclude_dict = {
+        'HaN_GTV':[],
+        'THOR_GTV':['27'],#['11','27']
+    }
+
     data_path_dict = {
-        'HaN_GTV':'/staff/shijun/dataset/Med_Seg/HaN_GTV/2d_test_data'
+        # 'HaN_GTV':'/staff/shijun/dataset/Med_Seg/HaN_GTV/2d_test_data',
+        'THOR_GTV':'/staff/shijun/dataset/Med_Seg/Thor_GTV/2d_test_data',
+        'HaN_GTV':'/staff/shijun/dataset/Med_Seg/HaN_GTV/3d_test_data'
     }
     cls_result_dict = {
-        'HaN_GTV':'./result/HaN_GTV/cls/v7.1-roi-half/GTV/vote.csv',
-        # 'HaN_GTV':'/staff/shijun/torch_projects/Med_Seg/converter/nii_converter/static_files/han_gtv_test.csv'
+        'HaN_GTV': '../Med_Seg/cls/analysis/result/HaN_GTV/v1.0-roi-equal/GTV_vote.csv',
+        # 'HaN_GTV': '../Med_Seg/cls/analysis/result/HaN_GTV/v1.0-roi-half/GTV_vote.csv', #*
+        # 'HaN_GTV': '../Med_Seg/cls/analysis/result/HaN_GTV/v1.0-roi-quar/GTV_vote.csv',
+        # 'HaN_GTV': '../Med_Seg/cls/analysis/result/HaN_GTV/v1.0-roi-all/GTV_vote.csv',       
+        # 'HaN_GTV': 'result/HaN_GTV/mtl/v10.1.1-roi-all-x16/GTV/vote.csv',                                                           
+        
+        # 'THOR_GTV': '../Med_Seg/cls/analysis/result/THOR_GTV/v1.0-roi-equal/GTV_vote.csv',
+        # 'THOR_GTV': '../Med_Seg/cls/analysis/result/THOR_GTV/v1.0-roi-half/GTV_vote.csv',
+        # 'THOR_GTV': '../Med_Seg/cls/analysis/result/THOR_GTV/v1.0-roi-quar/GTV_vote.csv',
+        'THOR_GTV': '../Med_Seg/cls/analysis/result/THOR_GTV/v1.0-roi-all/GTV_vote.csv',   
+        # 'THOR_GTV':'./result/THOR_GTV/mtl/v10.1.1-roi-all-x16/GTV/vote.csv'
+        # 'THOR_GTV':'/staff/shijun/torch_projects/Med_Seg/converter/nii_converter/static_files/thor_gtv_test.csv'
     }
     
     start = time.time()
     config = Config()
     data_path = data_path_dict[config.disease]
     sample_list = list(set([case.name.split('_')[0] for case in os.scandir(data_path)]))
+    sample_list = [case for case in sample_list if case not in exclude_dict[config.disease]]
     sample_list.sort()
-    # sample_list = ['39']
+    
     cls_result = csv_reader_single(cls_result_dict[config.disease],'id','pred') 
     # cls_result = csv_reader_single(cls_result_dict[config.disease],'path','GTV') 
 
     ensemble_result = {}
-    for fold in range(1,6):
+    for fold in [1,2,3,4,5]:
         print('>>>>>>>>>>>> Fold%d >>>>>>>>>>>>'%fold)
         total_dice = []
         total_hd = []
         info_dice = []
         info_hd = []
+
+        total_recall = []
+        total_precision = []
+        info_recall = []
+        info_precision = []
+
+        total_jc = []
+        total_vs = []
+        info_jc = []
+        info_vs = []
+
         config.fold = fold
         config.ckpt_path = f'./ckpt/{config.disease}/{config.mode}/{config.version}/{config.roi_name}/fold{str(fold)}'
-        save_dir = f'./result/{config.disease}/{config.mode}/{config.version}/{config.roi_name}'
+        save_dir = f'./result_v3/{config.disease}/{config.mode}/{config.version}/{config.roi_name}{config.post_fix}'
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
@@ -327,20 +379,43 @@ if __name__ == '__main__':
             info_item_hd = []
             info_item_dice.append(sample)
             info_item_hd.append(sample)
+
+            info_item_recall = []
+            info_item_precision = []
+            info_item_recall.append(sample)
+            info_item_precision.append(sample)
+
+            info_item_jc = []
+            info_item_vs = []
+            info_item_jc.append(sample)
+            info_item_vs.append(sample)
+
             print('>>>>>>>>>>>> %s is being processed'%sample)
             test_path = [case.path for case in os.scandir(data_path) if case.name.split('_')[0] == sample]
-            test_path.sort(key=lambda x:eval(x.split('_')[-1].split('.')[0]))
-            print(len(test_path))
+            data_len = len(test_path)
+            print('data len: %d'%data_len)
+
+            if len(config.input_shape) == 2:
+                test_path.sort(key=lambda x:eval(x.split('_')[-1].split('.')[0]))
+            
             # get end_index and start_index
             if config.two_stage:
                 sample_index = [cls_result[ID] for ID in test_path]
                 nonzero_index = np.nonzero(np.asarray(sample_index))
                 s_index, e_index = np.min(nonzero_index), np.max(nonzero_index)
-                test_path = test_path[s_index:e_index]
+            else:
+                s_index, e_index = 0, data_len
             ##
+            pred = np.zeros((data_len,) + config.input_shape, dtype=np.uint8)
+            true = np.zeros((data_len,) + config.input_shape, dtype=np.uint8)
+
             sample_start = time.time()
-            pred,true,extra_time = eval_process(test_path,config)
+            test_path = test_path[s_index:e_index]
+            pred[s_index:e_index],true[s_index:e_index],extra_time = eval_process(test_path,config)
             
+            pred = np.squeeze(pred)
+            true = np.squeeze(true)
+
             total_time = time.time() - sample_start 
             actual_time = total_time - extra_time
             print('total time:%.3f'%total_time)
@@ -348,22 +423,64 @@ if __name__ == '__main__':
             print("actual fps:%.3f"%(len(test_path)/actual_time))
             # print(pred.shape,true.shape)
 
+            ############ dice & hd
             category_dice, avg_dice = multi_dice(true,pred,config.num_classes - 1)
             total_dice.append(category_dice)
             print('category dice:',category_dice)
-            print('avg dice: %s'% avg_dice)
+            print('avg dice: %.3f'% avg_dice)
             # print(pred.shape,true.shape)
 
             category_hd, avg_hd = multi_hd(true,pred,config.num_classes - 1)
             total_hd.append(category_hd)
             print('category hd:',category_hd)
-            print('avg hd: %s'% avg_hd)
+            print('avg hd: %.3f'% avg_hd)
+
 
             info_item_dice.extend(category_dice)
             info_item_hd.extend(category_hd)
 
             info_dice.append(info_item_dice)
             info_hd.append(info_item_hd)
+
+            ############
+
+            ############ recall & precision for binary output
+            recall = recall_score(true.flatten(),pred.flatten())
+            precision = precision_score(true.flatten(),pred.flatten())
+            # cm = confusion_matrix(true.flatten(),pred.flatten())
+            
+            total_recall.append(recall)
+            print('category recall:%.3f'%recall)
+
+            total_precision.append(precision)
+            print('category precision:%.3f'%precision)
+
+            info_item_recall.append(recall)
+            info_item_precision.append(precision)
+
+            info_recall.append(info_item_recall)
+            info_precision.append(info_item_precision)
+
+            ############
+
+
+            ############ jc and vs for binary output
+            category_jc, avg_jc = multi_jc(true,pred,config.num_classes - 1)
+            category_vs, avg_vs = multi_vs(true,pred,config.num_classes - 1)
+            
+            total_jc.append(category_jc)
+            print('category jc:',category_jc)
+
+            total_vs.append(category_vs)
+            print('category vs:',category_vs)
+
+            info_item_jc.extend(category_jc)
+            info_item_vs.extend(category_vs)
+
+            info_jc.append(info_item_jc)
+            info_vs.append(info_item_vs)
+
+            ############
 
             if sample not in ensemble_result:
                 ensemble_result[sample] = {
@@ -375,12 +492,30 @@ if __name__ == '__main__':
         dice_csv = pd.DataFrame(data=info_dice)
         hd_csv = pd.DataFrame(data=info_hd)
 
+        recall_csv = pd.DataFrame(data=info_recall)
+        precision_csv = pd.DataFrame(data=info_precision)
+
+        jc_csv = pd.DataFrame(data=info_jc)
+        vs_csv = pd.DataFrame(data=info_vs)
+
         if not config.two_stage:
             dice_csv.to_csv(os.path.join(save_dir,f'fold{config.fold}_dice.csv'))
             hd_csv.to_csv(os.path.join(save_dir,f'fold{config.fold}_hd.csv'))
+
+            recall_csv.to_csv(os.path.join(save_dir,f'fold{config.fold}_recall.csv'))
+            precision_csv.to_csv(os.path.join(save_dir,f'fold{config.fold}_precision.csv'))
+
+            jc_csv.to_csv(os.path.join(save_dir,f'fold{config.fold}_jc.csv'))
+            vs_csv.to_csv(os.path.join(save_dir,f'fold{config.fold}_vs.csv'))
         else:
             dice_csv.to_csv(os.path.join(save_dir,f'ts_fold{config.fold}_dice.csv'))
             hd_csv.to_csv(os.path.join(save_dir,f'ts_fold{config.fold}_hd.csv'))
+
+            recall_csv.to_csv(os.path.join(save_dir,f'ts_fold{config.fold}_recall.csv'))
+            precision_csv.to_csv(os.path.join(save_dir,f'ts_fold{config.fold}_precision.csv'))
+
+            jc_csv.to_csv(os.path.join(save_dir,f'ts_fold{config.fold}_jc.csv'))
+            vs_csv.to_csv(os.path.join(save_dir,f'ts_fold{config.fold}_vs.csv'))
 
         total_dice = np.stack(total_dice,axis=0) #sample*classes
         total_category_dice = np.mean(total_dice,axis=0)
@@ -388,8 +523,7 @@ if __name__ == '__main__':
 
         print('total category dice mean:',total_category_dice)
         print('total category dice std:',np.std(total_dice,axis=0))
-        print('total dice mean: %s'% total_avg_dice)
-
+        print('total dice mean: %.3f'% total_avg_dice)
 
         total_hd = np.stack(total_hd,axis=0) #sample*classes
         total_category_hd = np.mean(total_hd,axis=0)
@@ -397,7 +531,31 @@ if __name__ == '__main__':
 
         print('total category hd mean:',total_category_hd)
         print('total category hd std:',np.std(total_hd,axis=0))
-        print('total hd mean: %s'% total_avg_hd)
+        print('total hd mean: %.3f'% total_avg_hd)
+
+        ##### for binary output
+        print('total recall mean:',np.mean(total_recall))
+        print('total recall std:',np.std(total_recall))
+        print('total precision mean:', np.mean(total_precision))
+        print('total precision std:',np.std(total_precision))
+
+
+        total_jc = np.stack(total_jc,axis=0) #sample*classes
+        total_category_jc = np.mean(total_jc,axis=0)
+        total_avg_jc = np.mean(total_category_jc)
+
+        print('total category jc mean:',total_category_jc)
+        print('total category jc std:',np.std(total_jc,axis=0))
+        print('total jc mean: %.3f'% total_avg_jc)
+
+        total_vs = np.stack(total_vs,axis=0) #sample*classes
+        total_category_vs = np.mean(total_vs,axis=0)
+        total_avg_vs = np.mean(total_category_vs)
+
+        print('total category vs mean:',total_category_vs)
+        print('total category vs std:',np.std(total_vs,axis=0))
+        print('total vs mean: %.3f'% total_avg_vs)
+        #####
 
         print("runtime:%.3f"%(time.time() - start))
 
@@ -408,45 +566,123 @@ if __name__ == '__main__':
     post_ensemble_info_dice = []
     post_ensemble_info_hd = []
 
+
+    ensemble_info_recall = []
+    ensemble_info_precision = []
+    post_ensemble_info_recall = []
+    post_ensemble_info_precision = []
+
+
+    ensemble_info_jc = []
+    ensemble_info_vs = []
+    post_ensemble_info_jc = []
+    post_ensemble_info_vs = []
+
     for sample in sample_list:
         print('>>>> %s in post processing'%sample)
         ensemble_pred = ensemble(np.stack(ensemble_result[sample]['pred'],axis=0),config.num_classes - 1)
         ensemble_true = ensemble_result[sample]['true'][0]
+        
         category_dice, avg_dice = multi_dice(ensemble_true,ensemble_pred,config.num_classes - 1)
         category_hd, avg_hd = multi_hd(ensemble_true,ensemble_pred,config.num_classes - 1)
 
-        post_ensemble_pred = post_seg(ensemble_pred,list(range(1,config.num_classes)))
-        post_category_dice, post_avg_dice = multi_dice(ensemble_true,ensemble_pred,config.num_classes - 1)
-        post_category_hd, post_avg_hd = multi_hd(ensemble_true,ensemble_pred,config.num_classes - 1)
+        ensemble_recall = recall_score(ensemble_true.flatten(),ensemble_pred.flatten())
+        ensemble_precision = precision_score(ensemble_true.flatten(),ensemble_pred.flatten())
+
+        category_jc, avg_jc = multi_jc(ensemble_true,ensemble_pred,config.num_classes - 1)
+        category_vs, avg_vs = multi_vs(ensemble_true,ensemble_pred,config.num_classes - 1)
+
+
+        post_ensemble_pred = post_seg(ensemble_pred,list(range(1,config.num_classes)),keep_max=config.disease=='HaN_GTV')
+        post_category_dice, post_avg_dice = multi_dice(ensemble_true,post_ensemble_pred,config.num_classes - 1)
+        post_category_hd, post_avg_hd = multi_hd(ensemble_true,post_ensemble_pred,config.num_classes - 1)
+
+        # print(np.unique(post_ensemble_pred))
+        post_ensemble_recall = recall_score(ensemble_true.flatten(),post_ensemble_pred.flatten())
+        post_ensemble_precision = precision_score(ensemble_true.flatten(),post_ensemble_pred.flatten())
+
+        post_category_jc, post_avg_jc = multi_jc(ensemble_true,post_ensemble_pred,config.num_classes - 1)
+        post_category_vs, post_avg_vs = multi_vs(ensemble_true,post_ensemble_pred,config.num_classes - 1)
+
+        print('ensemble recall:', ensemble_recall)
+        print('ensemble precision:', ensemble_precision)
+
+        print('post ensemble recall:', post_ensemble_recall)
+        print('post ensemble precision:', post_ensemble_precision)
 
 
         print('ensemble category dice:',category_dice)
-        print('ensemble avg dice: %s'% avg_dice)
+        print('ensemble avg dice: %.3f'% avg_dice)
         print('ensemble category hd:',category_hd)
-        print('ensemble avg hd: %s'% avg_hd)
+        print('ensemble avg hd: %.3f'% avg_hd)
 
+
+        print('ensemble category jc:',category_jc)
+        print('ensemble avg jc: %.3f'% avg_jc)
+        print('ensemble category vs:',category_vs)
+        print('ensemble avg vs: %.3f'% avg_vs)
 
         print('post ensemble category dice:',post_category_dice)
-        print('post ensemble avg dice: %s'% post_avg_dice)
+        print('post ensemble avg dice: %.3f'% post_avg_dice)
         print('post ensemble category hd:',post_category_hd)
-        print('post ensemble avg hd: %s'% post_avg_hd)
+        print('post ensemble avg hd: %.3f'% post_avg_hd)
+
+        print('post ensemble category jc:',post_category_jc)
+        print('post ensemble avg jc: %.3f'% post_avg_jc)
+        print('post ensemble category vs:',post_category_vs)
+        print('post ensemble avg vs: %.3f'% post_avg_vs)
         
 
         ensemble_item_dice = [sample]
         ensemble_item_hd = [sample]
         post_ensemble_item_dice = [sample]
         post_ensemble_item_hd = [sample]
+
+        ensemble_item_recall = [sample]
+        ensemble_item_precision = [sample]
+        post_ensemble_item_recall = [sample]
+        post_ensemble_item_precision = [sample]
+
+        ensemble_item_jc = [sample]
+        ensemble_item_vs = [sample]
+        post_ensemble_item_jc = [sample]
+        post_ensemble_item_vs = [sample]
+
         
         ensemble_item_dice.extend(category_dice)
         ensemble_item_hd.extend(category_hd)
         post_ensemble_item_dice.extend(post_category_dice)
         post_ensemble_item_hd.extend(post_category_hd)
+
+
+        ensemble_item_recall.append(ensemble_recall)
+        ensemble_item_precision.append(ensemble_precision)
+        post_ensemble_item_recall.append(post_ensemble_recall)
+        post_ensemble_item_precision.append(post_ensemble_precision)
         
+
+        ensemble_item_jc.extend(category_jc)
+        ensemble_item_vs.extend(category_vs)
+        post_ensemble_item_jc.extend(post_category_jc)
+        post_ensemble_item_vs.extend(post_category_vs)
+
 
         ensemble_info_dice.append(ensemble_item_dice)
         ensemble_info_hd.append(ensemble_item_hd)
         post_ensemble_info_dice.append(post_ensemble_item_dice)
         post_ensemble_info_hd.append(post_ensemble_item_hd)
+
+
+        ensemble_info_recall.append(ensemble_item_recall)
+        ensemble_info_precision.append(ensemble_item_precision)
+        post_ensemble_info_recall.append(post_ensemble_item_recall)
+        post_ensemble_info_precision.append(post_ensemble_item_precision)
+
+        ensemble_info_jc.append(ensemble_item_jc)
+        ensemble_info_vs.append(ensemble_item_vs)
+        post_ensemble_info_jc.append(post_ensemble_item_jc)
+        post_ensemble_info_vs.append(post_ensemble_item_vs)
+    
     
 
     ensemble_dice_csv = pd.DataFrame(data=ensemble_info_dice)
@@ -454,16 +690,48 @@ if __name__ == '__main__':
     post_ensemble_dice_csv = pd.DataFrame(data=post_ensemble_info_dice)
     post_ensemble_hd_csv = pd.DataFrame(data=post_ensemble_info_hd)
 
+
+    ensemble_recall_csv = pd.DataFrame(data=ensemble_info_recall)
+    ensemble_precision_csv = pd.DataFrame(data=ensemble_info_precision)
+    post_ensemble_recall_csv = pd.DataFrame(data=post_ensemble_info_recall)
+    post_ensemble_precision_csv = pd.DataFrame(data=post_ensemble_info_precision)
+
+
+    ensemble_jc_csv = pd.DataFrame(data=ensemble_info_jc)
+    ensemble_vs_csv = pd.DataFrame(data=ensemble_info_vs)
+    post_ensemble_jc_csv = pd.DataFrame(data=post_ensemble_info_jc)
+    post_ensemble_vs_csv = pd.DataFrame(data=post_ensemble_info_vs)
+
     if not config.two_stage:
         ensemble_dice_csv.to_csv(os.path.join(save_dir,'ensemble_dice.csv'))
         ensemble_hd_csv.to_csv(os.path.join(save_dir,'ensemble_hd.csv'))
         post_ensemble_dice_csv.to_csv(os.path.join(save_dir,'post_ensemble_dice.csv'))
         post_ensemble_hd_csv.to_csv(os.path.join(save_dir,'post_ensemble_hd.csv'))
 
+        ensemble_recall_csv.to_csv(os.path.join(save_dir,'ensemble_recall.csv'))
+        ensemble_precision_csv.to_csv(os.path.join(save_dir,'ensemble_precision.csv'))
+        post_ensemble_recall_csv.to_csv(os.path.join(save_dir,'post_ensemble_recall.csv'))
+        post_ensemble_precision_csv.to_csv(os.path.join(save_dir,'post_ensemble_precision.csv'))
+
+        ensemble_jc_csv.to_csv(os.path.join(save_dir,'ensemble_jc.csv'))
+        ensemble_vs_csv.to_csv(os.path.join(save_dir,'ensemble_vs.csv'))
+        post_ensemble_jc_csv.to_csv(os.path.join(save_dir,'post_ensemble_jc.csv'))
+        post_ensemble_vs_csv.to_csv(os.path.join(save_dir,'post_ensemble_vs.csv'))
+
     else:
         ensemble_dice_csv.to_csv(os.path.join(save_dir,'ts_ensemble_dice.csv'))
         ensemble_hd_csv.to_csv(os.path.join(save_dir,'ts_ensemble_hd.csv'))
         post_ensemble_dice_csv.to_csv(os.path.join(save_dir,'ts_post_ensemble_dice.csv'))
         post_ensemble_hd_csv.to_csv(os.path.join(save_dir,'ts_post_ensemble_hd.csv'))
+
+        ensemble_recall_csv.to_csv(os.path.join(save_dir,'ts_ensemble_recall.csv'))
+        ensemble_precision_csv.to_csv(os.path.join(save_dir,'ts_ensemble_precision.csv'))
+        post_ensemble_recall_csv.to_csv(os.path.join(save_dir,'ts_post_ensemble_recall.csv'))
+        post_ensemble_precision_csv.to_csv(os.path.join(save_dir,'ts_post_ensemble_precision.csv'))
+
+        ensemble_jc_csv.to_csv(os.path.join(save_dir,'ts_ensemble_jc.csv'))
+        ensemble_vs_csv.to_csv(os.path.join(save_dir,'ts_ensemble_vs.csv'))
+        post_ensemble_jc_csv.to_csv(os.path.join(save_dir,'ts_post_ensemble_jc.csv'))
+        post_ensemble_vs_csv.to_csv(os.path.join(save_dir,'ts_post_ensemble_vs.csv'))
 
     #### end

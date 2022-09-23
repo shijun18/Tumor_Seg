@@ -46,16 +46,18 @@ class SELayer(nn.Module):
 class DaDoubleConv3D(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
 
-    def __init__(self, in_channels, out_channels, mid_channels=None, depth=None):
+    def __init__(self, in_channels, out_channels, mid_channels=None, depth=None, norm_layer=None):
         super(DaDoubleConv3D,self).__init__()
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm3d
         if not mid_channels:
             mid_channels = out_channels
         
         self.conv1 = nn.Conv3d(in_channels, mid_channels, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm3d(mid_channels)
+        self.bn1 = norm_layer(mid_channels)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv3d(mid_channels, out_channels, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm3d(out_channels)
+        self.bn2 = norm_layer(out_channels)
         self.da = DepthAttention(out_channels,depth)
 
     def forward(self, x):
@@ -74,16 +76,18 @@ class DaDoubleConv3D(nn.Module):
 class DaSeDoubleConv3D(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
 
-    def __init__(self, in_channels, out_channels, mid_channels=None, depth=None):
+    def __init__(self, in_channels, out_channels, mid_channels=None, depth=None, norm_layer=None):
         super(DaSeDoubleConv3D,self).__init__()
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm3d
         if not mid_channels:
             mid_channels = out_channels
         
         self.conv1 = nn.Conv3d(in_channels, mid_channels, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm3d(mid_channels)
+        self.bn1 = norm_layer(mid_channels)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv3d(mid_channels, out_channels, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm3d(out_channels)
+        self.bn2 = norm_layer(out_channels)
         self.da = DepthAttention(out_channels,depth)
         self.se = SELayer(out_channels,reduction=16)
 
@@ -104,16 +108,18 @@ class DaSeDoubleConv3D(nn.Module):
 class SeDoubleConv3D(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
 
-    def __init__(self, in_channels, out_channels, mid_channels=None, depth=None):
+    def __init__(self, in_channels, out_channels, mid_channels=None, depth=None, norm_layer=None):
         super(SeDoubleConv3D,self).__init__()
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm3d
         if not mid_channels:
             mid_channels = out_channels
         
         self.conv1 = nn.Conv3d(in_channels, mid_channels, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm3d(mid_channels)
+        self.bn1 = norm_layer(mid_channels)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv3d(mid_channels, out_channels, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm3d(out_channels)
+        self.bn2 = norm_layer(out_channels)
         self.se = SELayer(out_channels,reduction=16)
 
     def forward(self, x):
@@ -132,16 +138,18 @@ class SeDoubleConv3D(nn.Module):
 class ResDaSeDoubleConv3D(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
 
-    def __init__(self, in_channels, out_channels, mid_channels=None, depth=None):
+    def __init__(self, in_channels, out_channels, mid_channels=None, depth=None, norm_layer=None):
         super(ResDaSeDoubleConv3D,self).__init__()
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm3d
         if not mid_channels:
             mid_channels = out_channels
         
         self.conv1 = nn.Conv3d(in_channels, mid_channels, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm3d(mid_channels)
+        self.bn1 = norm_layer(mid_channels)
         self.relu = nn.ReLU(inplace=True)
         self.conv2 = nn.Conv3d(mid_channels, out_channels, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm3d(out_channels)
+        self.bn2 = norm_layer(out_channels)
         self.da = DepthAttention(out_channels,depth)
         self.se = SELayer(out_channels,reduction=16)
         self.downsample = nn.Conv3d(in_channels, out_channels, kernel_size=1)
@@ -170,16 +178,18 @@ class ResDaSeDoubleConv3D(nn.Module):
 class DoubleConv3D(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
 
-    def __init__(self, in_channels, out_channels, mid_channels=None, depth=None):
+    def __init__(self, in_channels, out_channels, mid_channels=None, depth=None, norm_layer=None):
         super(DoubleConv3D,self).__init__()
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm3d
         if not mid_channels:
             mid_channels = out_channels
         self.double_conv = nn.Sequential(
             nn.Conv3d(in_channels, mid_channels, kernel_size=3, padding=1),
-            nn.BatchNorm3d(mid_channels),
+            norm_layer(mid_channels),
             nn.ReLU(inplace=True),
             nn.Conv3d(mid_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm3d(out_channels),
+            norm_layer(out_channels),
             nn.ReLU(inplace=True)
         )
 
@@ -191,11 +201,13 @@ class DoubleConv3D(nn.Module):
 class Down3D(nn.Module):
     """Downscaling with maxpool then double conv"""
 
-    def __init__(self, in_channels, out_channels, conv_builder, depth):
+    def __init__(self, in_channels, out_channels, conv_builder, depth, norm_layer=None):
         super(Down3D,self).__init__()
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm3d
         self.maxpool_conv = nn.Sequential(
             nn.MaxPool3d(2),
-            conv_builder(in_channels, out_channels, depth=depth)
+            conv_builder(in_channels, out_channels, depth=depth, norm_layer=norm_layer)
         )
 
     def forward(self, x):
@@ -207,16 +219,17 @@ class Down3D(nn.Module):
 class Up3D(nn.Module):
     """Upscaling then double conv"""
 
-    def __init__(self, in_channels, out_channels, conv_builder, depth, trilinear=True):
+    def __init__(self, in_channels, out_channels, conv_builder, depth, trilinear=True, norm_layer=None):
         super(Up3D,self).__init__()
-
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm3d
         # if bilinear, use the normal convolutions to reduce the number of channels
         if trilinear:
             self.up = nn.Upsample(scale_factor=2, mode='trilinear', align_corners=True)
-            self.conv = conv_builder(in_channels, out_channels, in_channels // 2, depth=depth)
+            self.conv = conv_builder(in_channels, out_channels, in_channels // 2, depth=depth, norm_layer=norm_layer)
         else:
             self.up = nn.ConvTranspose3d(in_channels, in_channels // 2, kernel_size=2, stride=2)
-            self.conv = conv_builder(in_channels, out_channels, depth=depth)
+            self.conv = conv_builder(in_channels, out_channels, depth=depth, norm_layer=norm_layer)
 
 
     def forward(self, x1, x2):
@@ -247,11 +260,14 @@ class Tail3D(nn.Module):
 #-------------------------------------------
 
 class VNet(nn.Module):
-    def __init__(self, stem, down, up, tail, width, depth, conv_builder,n_blocks=4, in_channels=1, classes=2, trilinear=True,dropout_rate=0.2):
+    def __init__(self, stem, down, up, tail, width, depth, conv_builder, norm_layer=None, n_blocks=4, in_channels=1, classes=2, trilinear=True,dropout_rate=0.2):
         super(VNet, self).__init__()
 
         assert len(width) == n_blocks + 1
         assert len(depth) == n_blocks + 1
+
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm3d
 
         self.n_blocks = n_blocks
         factor = 2 if trilinear else 1
@@ -262,11 +278,11 @@ class VNet(nn.Module):
         
         for i in range(n_blocks):
             if i < n_blocks - 1:
-                self.down_blocks.append(down(width[i], width[i+1], conv_builder, depth=depth[i+1]))
-                self.up_blocks .append(up(width[n_blocks - i], width[n_blocks - i - 1] // factor, conv_builder, depth=depth[n_blocks - i - 1], trilinear=trilinear))
+                self.down_blocks.append(down(width[i], width[i+1], conv_builder, depth=depth[i+1], norm_layer=norm_layer))
+                self.up_blocks .append(up(width[n_blocks - i], width[n_blocks - i - 1] // factor, conv_builder, depth=depth[n_blocks - i - 1], trilinear=trilinear, norm_layer=norm_layer))
             else:
-                self.down_blocks.append(down(width[i], width[i+1]//factor, conv_builder, depth=depth[i+1]))
-                self.up_blocks .append(up(width[n_blocks - i], width[n_blocks - i - 1], conv_builder, depth=depth[n_blocks - i - 1], trilinear=trilinear))
+                self.down_blocks.append(down(width[i], width[i+1]//factor, conv_builder, depth=depth[i+1], norm_layer=norm_layer))
+                self.up_blocks .append(up(width[n_blocks - i], width[n_blocks - i - 1], conv_builder, depth=depth[n_blocks - i - 1], trilinear=trilinear, norm_layer=norm_layer))
 
         self.dropout = nn.Dropout(p=0.2) if dropout_rate > 0. else nn.Identity()
         self.outc = tail(width[0], classes)
@@ -299,8 +315,10 @@ def vnet(init_depth=128,**kwargs):
                 width=[32,64,128,256,512],
                 depth=[init_depth,init_depth//2,init_depth//4,init_depth//8,init_depth//16],
                 conv_builder=DoubleConv3D,
+                norm_layer=nn.BatchNorm3d,
                 n_blocks=4,
                 **kwargs)
+
 
 
 def vnet_lite(init_depth=128,**kwargs):

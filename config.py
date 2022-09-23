@@ -8,7 +8,7 @@ from utils import get_weight_path,get_weight_list
 
 
 __cnn_net__ = ['unet','unet++','FPN','deeplabv3+','att_unet', \
-                'res_unet','sfnet','vnet','vnet_lite']
+                'res_unet','sfnet','vnet','vnet_lite','sanet','icnet']
 __swinconv__=['swinconv_base'] 
 
 __trans_net__ = ['UTNet','UTNet_encoder','TransUNet','ResNet_UTNet','SwinUNet']
@@ -33,17 +33,17 @@ json_path = {
     
 }
     
-DISEASE = 'HaN_GTV' 
-MODE = 'mtl'
-NET_NAME = 'sfnet'
-ENCODER_NAME = 'resnet18'
-VERSION = 'v7.1.1-roi-half'
+DISEASE = 'THOR_GTV' 
+MODE = 'seg'
+NET_NAME = 'sanet'
+ENCODER_NAME = 'swin_transformer'
+VERSION = 'v10.13-roi-quar-x16'
 
 
 with open(json_path[DISEASE], 'r') as fp:
     info = json.load(fp)
 
-DEVICE = '3'
+DEVICE = '0'
 # True if use internal pre-trained model
 # Must be True when pre-training and inference
 PRE_TRAINED = False
@@ -93,10 +93,10 @@ else:
 #--------------------------------- others
 if 'vnet' in NET_NAME:
     INPUT_SHAPE = (96,256,256)#(512,512) (256,256)
-    BATCH_SIZE = 8
+    BATCH_SIZE = 6
 else:
     INPUT_SHAPE = (512,512)#(512,512) (256,256)
-    BATCH_SIZE = 64
+    BATCH_SIZE = 32
 
 # CKPT_PATH = './ckpt/{}/{}/{}/{}/fold{}'.format(DISEASE,'cls',VERSION.replace('-cls','').replace('-freeze',''),ROI_NAME,str(CURRENT_FOLD))
 CKPT_PATH = './ckpt/{}/{}/{}/{}/fold{}'.format(DISEASE,MODE,VERSION,ROI_NAME,str(CURRENT_FOLD))
@@ -123,7 +123,7 @@ INIT_TRAINER = {
     'input_shape':INPUT_SHAPE,
     'crop':0,
     'batch_size':BATCH_SIZE,
-    'num_workers':2*GPU_NUM,
+    'num_workers':max(8,2*GPU_NUM),
     'device':DEVICE,
     'pre_trained':PRE_TRAINED,
     'ex_pre_trained':EX_PRE_TRAINED,
@@ -137,7 +137,7 @@ INIT_TRAINER = {
     'T_max':5,
     'mode':MODE,
     'topk':20,
-    'use_fp16':True, #False if the machine you used without tensor core
+    'use_fp16':False, #False if the machine you used without tensor core
     'aux_deepvision':False if 'sup' not in VERSION else True
  }
 #---------------------------------
@@ -169,6 +169,6 @@ SETUP_TRAINER = {
   }
 #---------------------------------
 
-if DISEASE in ['HaN_GTV']:
+if DISEASE in ['HaN_GTV','THOR_GTV']:
     if ROI_NUMBER is not None:
         TEST_PATH = glob.glob(os.path.join(info['2d_data']['test_path'],'*.hdf5'))

@@ -31,6 +31,8 @@ from data_utils.data_loader import DataGenerator, To_Tensor, CropResize, Trunc_a
 from torch.cuda.amp import autocast as autocast
 
 from torch.cuda.amp import GradScaler
+
+import setproctitle
 import warnings
 warnings.filterwarnings('ignore')
 # GPU version.
@@ -258,6 +260,9 @@ class SemanticSeg(object):
 
         early_stopping = EarlyStopping(patience=50,verbose=True,monitor=monitor,op_type='max')
         for epoch in range(self.start_epoch, self.n_epoch):
+
+            setproctitle.setproctitle('{}: {}/{}'.format('Shi Jun', epoch, self.n_epoch))
+
             train_loss, train_dice, train_acc, train_run_dice = self._train_on_epoch(epoch, net, loss, optimizer, train_loader, scaler)
 
             val_loss, val_dice, val_acc, val_run_dice = self._val_on_epoch(epoch, net, loss, val_path)
@@ -562,7 +567,7 @@ class SemanticSeg(object):
                                     transform=test_transformer)
 
         test_loader = DataLoader(test_dataset,
-                                batch_size=16,
+                                batch_size=32,
                                 shuffle=False,
                                 num_workers=self.num_workers,
                                 pin_memory=True)
@@ -600,7 +605,7 @@ class SemanticSeg(object):
                     acc = accuracy(cls_output.detach(), label)
                     test_acc.update(acc.item(),data.size(0))
 
-                    cls_result['prob'].extend(cls_output.detach().squeeze().cpu().numpy().tolist())
+                    cls_result['prob'].extend(cls_output.detach().squeeze().cpu().numpy().astype(np.uint8).tolist())
                     cls_output = (cls_output > 0.5).float() # N*C
                     cls_result['pred'].extend(cls_output.detach().squeeze().cpu().numpy().tolist())
                     cls_result['true'].extend(label.detach().squeeze().cpu().numpy().tolist())
@@ -617,15 +622,21 @@ class SemanticSeg(object):
                     dice = compute_dice(seg_output.detach(), target, ignore_index=0)
                     test_dice.update(dice.item(), data.size(0))
 
+                    if mode == 'mtl':
+                        b, c, _, _ = seg_output.size()
+                        seg_output[:,1:,...] = seg_output[:,1:,...] * cls_output.view(b,c-1,1,1).expand_as(seg_output[:,1:,...])
+
                     seg_output = torch.argmax(seg_output,1).detach().cpu().numpy()  #N*H*W N=1
                     target = torch.argmax(target,1).detach().cpu().numpy()
+                    if mode == 'seg':
+                        cls_output = (np.sum(seg_output,axis=(1,2)) != 0).astype(np.uint8).tolist()
+                        cls_result['pred'].extend(cls_output)
+                        cls_result['true'].extend(label.detach().squeeze().cpu().numpy().tolist())
                     run_dice.update_matrix(target,seg_output)
                     # print(np.unique(seg_output),np.unique(target))
                     print('step:{},test_dice:{:.5f}'.format(step,dice.item()))
                     
-                if mode == 'mtl':
-                    b, c, _, _ = seg_output.size()
-                    seg_output[:,1:,...] = seg_output[:,1:,...] * cls_output.view(b,c-1,1,1).expand_as(seg_output[:,1:,...])
+               
 
 
                 # save
@@ -759,6 +770,16 @@ class SemanticSeg(object):
                 aux_classifier=self.aux_classifier
             )
         
+        elif net_name == 'sanet':
+            from model.sanet import sanet
+            net = sanet(net_name,
+                encoder_name=self.encoder_name,
+                encoder_weights=self.use_ssl,
+                in_channels=self.channels,
+                classes=self.num_classes,
+                aux_classifier=self.aux_classifier
+            )
+        
         elif net_name.startswith('swinconv'):
             import model.swin_conv as swin_conv
             net = swin_conv.__dict__[net_name](
@@ -860,21 +881,74 @@ class SemanticSeg(object):
         
         return loss
 
-    def _get_optimizer(self, optimizer, net, lr):
-        if optimizer == 'Adam':
-            optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, net.parameters()),
-                                         lr=lr,
-                                         weight_decay=self.weight_decay)
+    # def _get_optimizer(self, optimizer, net, lr):
 
-        elif optimizer == 'SGD':
-            optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, net.parameters()),
-                                        lr=lr,
-                                        weight_decay=self.weight_decay,
-                                        momentum=self.momentum)
-        elif optimizer == 'AdamW':
-            optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, net.parameters()),
-                                         lr=lr,weight_decay=self.weight_decay)
+    #     parameters = get_optimizer_param(net)
+
+    #     if optimizer == 'Adam':
+    #         optimizer = torch.optim.Adam(parameters,
+    #                                      lr=lr,
+    #                                      weight_decay=self.weight_decay)
+
+    #     elif optimizer == 'SGD':
+    #         optimizer = torch.optim.SGD(parameters,
+    #                                     lr=lr,
+    #                                     weight_decay=self.weight_decay,
+    #                                     momentum=self.momentum)
+    #     elif optimizer == 'AdamW':
+    #         optimizer = torch.optim.AdamW(parameters,
+    #                                      lr=lr,weight_decay=self.weight_decay)
+    #     return optimizer
+
+    def _get_optimizer(self, optimizer, net, lr):
+        """
+        Build optimizer, set weight decay of normalization to 0 by default.
+        """
+        def check_keywords_in_name(name, keywords=()):
+            isin = False
+            for keyword in keywords:
+                if keyword in name:
+                    isin = True
+            return isin
+
+        def set_weight_decay(model, skip_list=(), skip_keywords=()):
+            has_decay = []
+            no_decay = []
+
+            for name, param in model.named_parameters():
+                # check what will happen if we do not set no_weight_decay
+                if not param.requires_grad:
+                    continue  # frozen weights
+                if len(param.shape) == 1 or name.endswith(".bias") or (name in skip_list) or \
+                        check_keywords_in_name(name, skip_keywords):
+                    no_decay.append(param)
+                    # print(f"{name} has no weight decay")
+                else:
+                    has_decay.append(param)
+            return [{'params': has_decay},
+                    {'params': no_decay, 'weight_decay': 0.}]
+
+        skip = {}
+        skip_keywords = {}
+        if hasattr(net, 'no_weight_decay'):
+            skip = net.no_weight_decay()
+        if hasattr(net, 'no_weight_decay_keywords'):
+            skip_keywords = net.no_weight_decay_keywords()
+        parameters = set_weight_decay(net, skip, skip_keywords)
+
+        opt_lower = optimizer.lower()
+        optimizer = None
+        if opt_lower == 'sgd':
+            optimizer = torch.optim.SGD(parameters, momentum=self.momentum, nesterov=True,
+                                lr=lr, weight_decay=self.weight_decay)
+        elif opt_lower == 'adamw':
+            optimizer = torch.optim.AdamW(parameters, eps=1e-8, betas=(0.9, 0.999),
+                                    lr=lr, weight_decay=self.weight_decay)
+        elif opt_lower == 'adam':
+            optimizer = torch.optim.Adam(parameters, lr=lr, weight_decay=self.weight_decay)
+
         return optimizer
+
 
     def _get_lr_scheduler(self, lr_scheduler, optimizer):
         if lr_scheduler == 'ReduceLROnPlateau':
@@ -1046,3 +1120,47 @@ class EarlyStopping(object):
         if self.verbose:
            print(self.monitor, f'optimized ({self.val_score_min:.6f} --> {val_score:.6f}).  Saving model ...')
         self.val_score_min = val_score
+
+
+
+
+def get_optimizer_param(model):
+    """
+    Get optimizer parameters, set weight decay of normalization to 0 by default.
+    """
+    def check_keywords_in_name(name, keywords=()):
+        isin = False
+        for keyword in keywords:
+            if keyword in name:
+                isin = True
+        return isin
+
+    def set_weight_decay(model, skip_list=(), skip_keywords=()):
+        has_decay = []
+        no_decay = []
+
+        for name, param in model.named_parameters():
+            # check what will happen if we do not set no_weight_decay
+            if not param.requires_grad:
+                continue  # frozen weights
+            if len(param.shape) == 1 or name.endswith(".bias") or (name in skip_list) or \
+                    check_keywords_in_name(name, skip_keywords):
+                no_decay.append(param)
+                # print(f"{name} has no weight decay")
+            else:
+                has_decay.append(param)
+        return [{'params': has_decay},
+                {'params': no_decay, 'weight_decay': 0.}]
+    
+    skip = {}
+    skip_keywords = {}
+    if hasattr(model, 'no_weight_decay'):
+        skip = model.no_weight_decay()
+    if hasattr(model, 'no_weight_decay_keywords'):
+        skip_keywords = model.no_weight_decay_keywords()
+    parameters = set_weight_decay(model, skip, skip_keywords)
+
+    return parameters
+
+
+
