@@ -1,4 +1,5 @@
 import os
+from re import T
 import time
 import numpy as np
 import pandas as pd
@@ -12,7 +13,7 @@ from torch.cuda.amp import autocast as autocast
 from utils import get_weight_path,multi_dice,multi_hd,ensemble,post_seg,cal_score,multi_vs,multi_jc
 import warnings
 import SimpleITK as sitk
-from utils import csv_reader_single
+from utils import csv_reader_single,hdf5_reader
 warnings.filterwarnings('ignore')
 
 def resize_and_pad(pred,true,num_classes,target_shape,bboxs):
@@ -284,22 +285,22 @@ class Config:
         'THOR_GTV':'GTV'
     }
     
-    input_shape = (96,512,512) #(512,512)(96,256,256)
+    input_shape = (512,512) #(512,512)(96,256,256)
     channels = 1
     crop = 0
     roi_number = 1
     batch_size = 32
     
-    disease = 'HaN_GTV'
+    disease = 'THOR_GTV'
     mode = 'seg'
     num_classes = num_classes_dict[disease]
     scale = scale_dict[disease]
 
-    two_stage = False
+    two_stage = True
     
-    net_name = 'vnet'
-    encoder_name = None
-    version = 'v8.0'
+    net_name = 'sanet'
+    encoder_name = 'resnet18'
+    version = 'v10.1.4-roi-equal-x16'
     
     fold = 1
     device = "3"
@@ -309,7 +310,7 @@ class Config:
     aux_deepvision = False if 'sup' not in version else True
     aux_classifier = mode != 'seg'
     ckpt_path = f'./ckpt/{disease}/{mode}/{version}/{roi_name}'
-    post_fix = ''
+    post_fix = '_equal'
 
 
 if __name__ == '__main__':
@@ -321,21 +322,24 @@ if __name__ == '__main__':
     }
 
     data_path_dict = {
-        # 'HaN_GTV':'/staff/shijun/dataset/Med_Seg/HaN_GTV/2d_test_data',
+        'HaN_GTV':'/staff/shijun/dataset/Med_Seg/HaN_GTV/2d_test_data',
+        # 'HaN_GTV':'/staff/shijun/dataset/Med_Seg/HaN_GTV/3d_test_data',
         'THOR_GTV':'/staff/shijun/dataset/Med_Seg/Thor_GTV/2d_test_data',
-        'HaN_GTV':'/staff/shijun/dataset/Med_Seg/HaN_GTV/3d_test_data'
+        # 'THOR_GTV':'/staff/shijun/dataset/Med_Seg/Thor_GTV/3d_test_data',
+        
     }
     cls_result_dict = {
-        'HaN_GTV': '../Med_Seg/cls/analysis/result/HaN_GTV/v1.0-roi-equal/GTV_vote.csv',
+        # 'HaN_GTV': '../Med_Seg/cls/analysis/result/HaN_GTV/v1.0-roi-equal/GTV_vote.csv',
         # 'HaN_GTV': '../Med_Seg/cls/analysis/result/HaN_GTV/v1.0-roi-half/GTV_vote.csv', #*
-        # 'HaN_GTV': '../Med_Seg/cls/analysis/result/HaN_GTV/v1.0-roi-quar/GTV_vote.csv',
+        'HaN_GTV': '../Med_Seg/cls/analysis/result/HaN_GTV/v1.0-roi-quar/GTV_vote.csv',
         # 'HaN_GTV': '../Med_Seg/cls/analysis/result/HaN_GTV/v1.0-roi-all/GTV_vote.csv',       
-        # 'HaN_GTV': 'result/HaN_GTV/mtl/v10.1.1-roi-all-x16/GTV/vote.csv',                                                           
+        # 'HaN_GTV': './result/HaN_GTV/mtl/v10.1.1-roi-all-x16/GTV/vote.csv',
+        # 'HaN_GTV':'/staff/shijun/torch_projects/Med_Seg/converter/nii_converter/static_files/han_gtv_test.csv',                                                           
         
-        # 'THOR_GTV': '../Med_Seg/cls/analysis/result/THOR_GTV/v1.0-roi-equal/GTV_vote.csv',
+        'THOR_GTV': '../Med_Seg/cls/analysis/result/THOR_GTV/v1.0-roi-equal/GTV_vote.csv',
         # 'THOR_GTV': '../Med_Seg/cls/analysis/result/THOR_GTV/v1.0-roi-half/GTV_vote.csv',
         # 'THOR_GTV': '../Med_Seg/cls/analysis/result/THOR_GTV/v1.0-roi-quar/GTV_vote.csv',
-        'THOR_GTV': '../Med_Seg/cls/analysis/result/THOR_GTV/v1.0-roi-all/GTV_vote.csv',   
+        # 'THOR_GTV': '../Med_Seg/cls/analysis/result/THOR_GTV/v1.0-roi-all/GTV_vote.csv',   
         # 'THOR_GTV':'./result/THOR_GTV/mtl/v10.1.1-roi-all-x16/GTV/vote.csv'
         # 'THOR_GTV':'/staff/shijun/torch_projects/Med_Seg/converter/nii_converter/static_files/thor_gtv_test.csv'
     }
@@ -370,7 +374,7 @@ if __name__ == '__main__':
 
         config.fold = fold
         config.ckpt_path = f'./ckpt/{config.disease}/{config.mode}/{config.version}/{config.roi_name}/fold{str(fold)}'
-        save_dir = f'./result_v3/{config.disease}/{config.mode}/{config.version}/{config.roi_name}{config.post_fix}'
+        save_dir = f'./result_v4/{config.disease}/{config.mode}/{config.version}/{config.roi_name}{config.post_fix}'
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
@@ -401,17 +405,26 @@ if __name__ == '__main__':
             # get end_index and start_index
             if config.two_stage:
                 sample_index = [cls_result[ID] for ID in test_path]
-                nonzero_index = np.nonzero(np.asarray(sample_index))
+                nonzero_index = np.nonzero(np.asarray(sample_index))[0]
                 s_index, e_index = np.min(nonzero_index), np.max(nonzero_index)
             else:
+                nonzero_index = np.asarray(range(data_len))
                 s_index, e_index = 0, data_len
             ##
-            pred = np.zeros((data_len,) + config.input_shape, dtype=np.uint8)
-            true = np.zeros((data_len,) + config.input_shape, dtype=np.uint8)
-
             sample_start = time.time()
-            test_path = test_path[s_index:e_index]
-            pred[s_index:e_index],true[s_index:e_index],extra_time = eval_process(test_path,config)
+
+            # pred = np.zeros((data_len,) + config.input_shape, dtype=np.uint8)
+            # true = np.stack([hdf5_reader(item,'label').astype(np.uint8) for item in test_path],axis=0)
+            # assert true.shape[0] == data_len
+            # test_path = test_path[s_index:e_index]
+            # pred[s_index:e_index],true[s_index:e_index],extra_time = eval_process(test_path,config)
+            img = np.stack([hdf5_reader(item,'image') for item in test_path],axis=0)
+
+            pred = np.zeros((data_len,) + config.input_shape, dtype=np.uint8)
+            true = np.stack([hdf5_reader(item,'label').astype(np.uint8) for item in test_path],axis=0)
+            assert true.shape[0] == data_len
+            test_path = [test_path[index] for index in list(nonzero_index)]
+            pred[nonzero_index],true[nonzero_index],extra_time = eval_process(test_path,config)
             
             pred = np.squeeze(pred)
             true = np.squeeze(true)
@@ -582,6 +595,7 @@ if __name__ == '__main__':
         print('>>>> %s in post processing'%sample)
         ensemble_pred = ensemble(np.stack(ensemble_result[sample]['pred'],axis=0),config.num_classes - 1)
         ensemble_true = ensemble_result[sample]['true'][0]
+
         
         category_dice, avg_dice = multi_dice(ensemble_true,ensemble_pred,config.num_classes - 1)
         category_hd, avg_hd = multi_hd(ensemble_true,ensemble_pred,config.num_classes - 1)
@@ -603,6 +617,17 @@ if __name__ == '__main__':
 
         post_category_jc, post_avg_jc = multi_jc(ensemble_true,post_ensemble_pred,config.num_classes - 1)
         post_category_vs, post_avg_vs = multi_vs(ensemble_true,post_ensemble_pred,config.num_classes - 1)
+
+        ### save result as nii
+        from utils import save_as_nii
+        nii_path = os.path.join(save_dir,'nii')
+        if not os.path.exists(nii_path):
+            os.makedirs(nii_path)
+        img_path = os.path.join(nii_path, sample + '_image.nii.gz')
+        lab_path = os.path.join(nii_path, sample + '_label.nii.gz')
+        save_as_nii(img,img_path)
+        save_as_nii(post_ensemble_pred,lab_path) 
+        ###
 
         print('ensemble recall:', ensemble_recall)
         print('ensemble precision:', ensemble_precision)

@@ -33,11 +33,11 @@ json_path = {
     
 }
     
-DISEASE = 'THOR_GTV' 
+DISEASE = 'HaN_GTV' 
 MODE = 'seg'
 NET_NAME = 'sanet'
-ENCODER_NAME = 'swin_transformer'
-VERSION = 'v10.13-roi-quar-x16'
+ENCODER_NAME = 'resnet18'
+VERSION = 'v10.1.4-roi-all-x16'
 
 
 with open(json_path[DISEASE], 'r') as fp:
@@ -137,7 +137,7 @@ INIT_TRAINER = {
     'T_max':5,
     'mode':MODE,
     'topk':20,
-    'use_fp16':False, #False if the machine you used without tensor core
+    'use_fp16':True, #False if the machine you used without tensor core
     'aux_deepvision':False if 'sup' not in VERSION else True
  }
 #---------------------------------
@@ -172,3 +172,5 @@ SETUP_TRAINER = {
 if DISEASE in ['HaN_GTV','THOR_GTV']:
     if ROI_NUMBER is not None:
         TEST_PATH = glob.glob(os.path.join(info['2d_data']['test_path'],'*.hdf5'))
+else:
+    TEST_PATH = None

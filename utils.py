@@ -378,6 +378,13 @@ def dfs_rename_weight(ckpt_path):
             rename_weight_path(ckpt_path)
             break  
 
+
+
+def save_as_nii(data, save_path):
+    sitk_data = sitk.GetImageFromArray(data)
+    sitk.WriteImage(sitk_data, save_path)
+
+
 if __name__ == "__main__":
 
     # ckpt_path = './ckpt/TMLI_UP/seg/v9.0/All/fold1/'
@@ -386,19 +393,25 @@ if __name__ == "__main__":
     # ckpt_path = './ckpt/'
     # dfs_rename_weight(ckpt_path)
 
-    data_path  = '/staff/shijun/dataset/Med_Seg/HaN_GTV/npy_data'
-    
-    min_index = 200
-    max_index = 0
+    save_dir = './dataset/HaN_GTV/'
+    data_path  = '/staff/shijun/dataset/Med_Seg/HaN_GTV/2d_test_data'
+    # save_dir = './dataset/THOR_GTV/'
+    # data_path  = '/staff/shijun/dataset/Med_Seg/Thor_GTV/2d_test_data'
+    sample_list = list(set([case.name.split('_')[0] for case in os.scandir(data_path)]))
 
-    for sample in os.scandir(data_path):
-        data_array = hdf5_reader(sample.path,'label')
+    for sample in sample_list:
+        test_path = [case.path for case in os.scandir(data_path) if case.name.split('_')[0] == sample]
+        test_path.sort(key=lambda x:eval(x.split('_')[-1].split('.')[0]))
         # print(data_array.shape)
-        data_index = np.sum(data_array,axis=(1,2))
-        data_index = (data_index > 0).astype(np.uint8)
-        nonzero = np.nonzero(data_index)
-        max_index = max_index if np.max(nonzero) < max_index else np.max(nonzero)
-        min_index = min_index if np.min(nonzero) > min_index else np.min(nonzero)
+        image = np.stack([hdf5_reader(item,'image') for item in test_path],axis=0)
+        label = np.stack([hdf5_reader(item,'label').astype(np.uint8) for item in test_path],axis=0)
+
+        img_path = os.path.join(save_dir,sample + '_image.nii.gz')
+        lab_path = os.path.join(save_dir,sample + '_label.nii.gz')
+
+        print(img_path)
+        print(lab_path)
+
+        save_as_nii(image,img_path)
+        save_as_nii(label,lab_path)    
     
-    
-    print(min_index,max_index)
